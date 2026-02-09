@@ -1,7 +1,7 @@
 {
   "name": "talking-avatar-chatbot",
   "version": "1.0.0",
-  "description": "TalkingHead Digital Avatar with OpenAI Chained Voice Architecture",
+  "description": "TalkingHead Digital Avatar with Google Gemini Live API",
   "main": "server/server.js",
   "type": "module",
   "scripts": {
@@ -13,7 +13,7 @@
   "keywords": [
     "avatar",
     "chatbot",
-    "openai",
+    "gemini",
     "talkinghead",
     "voice",
     "ai"
@@ -21,14 +21,13 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@google/genai": "^1.0.0",
     "express": "^4.18.2",
     "dotenv": "^16.3.1",
-    "openai": "^4.20.0",
     "ws": "^8.14.2",
     "cors": "^2.8.5",
     "jsonwebtoken": "^9.0.2",
-    "express-rate-limit": "^7.1.5",
-    "multer": "^1.4.5-lts.1"
+    "express-rate-limit": "^7.1.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

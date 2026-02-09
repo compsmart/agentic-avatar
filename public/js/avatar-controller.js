@@ -4,69 +4,82 @@ export class AvatarController {
     this.isSpeaking = false;
     this.currentMood = 'neutral';
   }
-  
+
   async init() {
     if (!this.head) {
       throw new Error('TalkingHead instance not provided');
     }
     console.log('Avatar controller initialized');
   }
-  
+
+  // --- Tool call dispatcher (Gemini function calling) ---
+
+  /**
+   * Execute an avatar action from a Gemini tool call.
+   * @param {string} name - Tool function name
+   * @param {Object} args - Tool arguments
+   * @returns {string} result description
+   */
+  handleToolCall(name, args) {
+    switch (name) {
+      case 'set_mood':
+        this.setMood(args.mood);
+        return `Mood set to ${args.mood}`;
+
+      case 'play_gesture':
+        this.playGesture(args.gesture, args.duration || 2);
+        return `Playing gesture ${args.gesture}`;
+
+      case 'play_animation':
+        this.playAnimation(args.animation, args.duration);
+        return `Playing animation ${args.animation}`;
+
+      case 'set_camera_view':
+        this.setCameraView(args.view);
+        return `Camera view set to ${args.view}`;
+
+      default:
+        console.warn(`Unknown tool call: ${name}`);
+        return `Unknown tool: ${name}`;
+    }
+  }
+
+  // --- Speech (legacy, kept for non-streaming fallback) ---
+
   async speak(audioData, timestamps, text) {
     try {
       this.isSpeaking = true;
-      
-      // Convert base64 audio to AudioBuffer
+
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
       const binary = atob(audioData);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) {
         bytes[i] = binary.charCodeAt(i);
       }
-      
+
       const audioBuffer = await audioContext.decodeAudioData(bytes.buffer);
-      console.log('🎵 Audio buffer decoded:', {
-        duration: audioBuffer.duration,
-        sampleRate: audioBuffer.sampleRate,
-        numberOfChannels: audioBuffer.numberOfChannels
-      });
-      
-      // Prepare word timing data - IMPORTANT: TalkingHead expects milliseconds!
+
       const words = timestamps.map(t => t.word);
-      const wtimes = timestamps.map(t => t.start); // Keep in milliseconds
-      const wdurations = timestamps.map(t => t.duration); // Keep in milliseconds
-      
-      console.log('👄 Lip-sync data prepared:', {
-        words: words,
-        wtimes: wtimes,
-        wdurations: wdurations,
-        totalWords: words.length,
-        firstWord: words[0],
-        firstTime: wtimes[0] + 'ms',
-        audioDuration: audioBuffer.duration + 's'
-      });
-      
-      // Use TalkingHead's speakAudio method with correct format
-      // Pass complete audio object as first parameter
+      const wtimes = timestamps.map(t => t.start);
+      const wdurations = timestamps.map(t => t.duration);
+
       await this.head.speakAudio({
         audio: audioBuffer,
-        words: words,
-        wtimes: wtimes,
-        wdurations: wdurations
+        words,
+        wtimes,
+        wdurations
       }, {
         lipsyncLang: 'en'
       });
-      
+
       this.isSpeaking = false;
-      console.log('✅ Speech and lip-sync completed successfully');
     } catch (error) {
-      console.error('❌ Avatar speak error:', error);
-      console.error('Error stack:', error.stack);
+      console.error('Avatar speak error:', error);
       this.isSpeaking = false;
       throw error;
     }
   }
-  
+
   async speakText(text) {
     try {
       this.isSpeaking = true;
@@ -78,7 +91,9 @@ export class AvatarController {
       throw error;
     }
   }
-  
+
+  // --- Mood ---
+
   setMood(mood) {
     try {
       this.currentMood = mood;
@@ -88,7 +103,23 @@ export class AvatarController {
       console.error('Set mood error:', error);
     }
   }
-  
+
+  // --- Camera ---
+
+  setCameraView(view) {
+    try {
+      if (this.head?.setView) {
+        this.head.setView(view);
+        console.log(`Camera view set to: ${view}`);
+        // Sync the UI dropdown
+        const viewSelect = document.getElementById('camera-view');
+        if (viewSelect) viewSelect.value = view;
+      }
+    } catch (error) {
+      console.error('Set camera view error:', error);
+    }
+  }
+
   lookAtCamera(duration = 1000) {
     try {
       this.head.lookAtCamera(duration);
@@ -96,7 +127,7 @@ export class AvatarController {
       console.error('Look at camera error:', error);
     }
   }
-  
+
   makeEyeContact(duration = 3000) {
     try {
       this.head.lookAtCamera(duration);
@@ -104,64 +135,50 @@ export class AvatarController {
       console.error('Make eye contact error:', error);
     }
   }
-  
+
+  // --- Gestures ---
+
   playGesture(gesture, duration = 2) {
     try {
       this.head.playGesture(gesture, duration);
+      console.log(`Playing gesture: ${gesture}`);
     } catch (error) {
       console.error('Play gesture error:', error);
     }
   }
-  
-  /**
-   * Play an FBX animation
-   * @param {string} animationName - Name of the animation (e.g., 'waving', 'breakdance')
-   * @param {number} duration - Duration in seconds
-   * @param {number} scale - Scale factor for Mixamo animations (default 0.01)
-   */
+
+  // --- Animations ---
+
   async playAnimation(animationName, duration = 5, scale = 0.01) {
     try {
-      // Get animation configuration from library
       const animConfig = window.animationLibrary?.getAnimation(animationName);
       if (!animConfig) {
         console.warn(`Animation "${animationName}" not found in library`);
         return false;
       }
-      
-      // URL encode the filename to handle spaces
+
       const encodedFileName = encodeURIComponent(animConfig.file);
       const url = `/animations/${encodedFileName}`;
-      
-      // Use the duration from config if not specified
       const finalDuration = duration || animConfig.duration || 5;
-      
-      console.log(`🎬 Playing animation: ${animationName} (${animConfig.file}) for ${finalDuration}s`);
-      
+
+      console.log(`Playing animation: ${animationName} (${animConfig.file}) for ${finalDuration}s`);
       await this.head.playAnimation(url, null, finalDuration, 0, scale);
-      
-      console.log(`✅ Animation ${animationName} started successfully`);
       return true;
     } catch (error) {
-      console.error(`❌ Error playing animation ${animationName}:`, error);
+      console.error(`Error playing animation ${animationName}:`, error);
       throw error;
     }
   }
 
-  /**
-   * Stop the current animation
-   */
   stopAnimation() {
     try {
       this.head.stopAnimation();
-      console.log('⏹️ Animation stopped');
+      console.log('Animation stopped');
     } catch (error) {
       console.error('Error stopping animation:', error);
     }
   }
 
-  /**
-   * Check if animation is currently playing
-   */
   isAnimationPlaying() {
     try {
       return this.head.mixer && this.head.mixer._actions.length > 0;
@@ -169,7 +186,9 @@ export class AvatarController {
       return false;
     }
   }
-  
+
+  // --- Misc ---
+
   speakEmoji(emoji) {
     try {
       this.head.speakEmoji(emoji);
@@ -177,7 +196,7 @@ export class AvatarController {
       console.error('Speak emoji error:', error);
     }
   }
-  
+
   stopSpeaking() {
     try {
       if (this.isSpeaking) {
@@ -188,7 +207,7 @@ export class AvatarController {
       console.error('Stop speaking error:', error);
     }
   }
-  
+
   getIsSpeaking() {
     return this.isSpeaking;
   }

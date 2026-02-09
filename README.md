@@ -1,358 +1,285 @@
-# TalkingHead Digital Avatar with OpenAI Voice Architecture
+# TalkingHead — AI Avatar Assistant
 
-A real-time talking digital avatar chatbot powered by OpenAI's chained voice architecture (STT → LLM → TTS) and the TalkingHead 3D avatar library.
+A real-time 3D talking avatar chatbot powered by **Google Gemini Live API** and the [TalkingHead](https://github.com/met4citizen/TalkingHead) library. Talk to an expressive, animated avatar using your voice or text — it responds with natural speech, lip-sync, gestures, moods, and full-body animations, all driven by AI.
 
-## 🌟 Features
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)
 
-- **Real-time Voice Conversation**: Speak naturally with an AI avatar using your microphone
-- **Intelligent Responses**: Powered by GPT-4 for contextual, conversational AI
-- **Lip-Sync Animation**: Accurate mouth movements synchronized with speech
-- **Multiple Voice Options**: Choose from 6 different OpenAI TTS voices
-- **Avatar Behaviors**: Natural idle animations and emotional reactions
-- **WebSocket Streaming**: Low-latency real-time communication
-- **Responsive Design**: Works on desktop and mobile devices
-- **Production Ready**: Includes authentication, rate limiting, and error handling
+---
 
-## 🏗️ Architecture
+## Features
+
+- **Real-time voice conversation** — Bidirectional audio streaming via WebSocket and the Gemini Live API
+- **Accurate lip-sync** — TalkingHead library maps Gemini audio to viseme-driven mouth animation in real time
+- **AI-controlled expressions** — Gemini uses function calling to set avatar moods (`happy`, `sad`, `angry`, `love`, `neutral`), play gestures, trigger full-body animations, and change camera angles — all contextually during conversation
+- **Full-body animations** — Breakdance, cheering, clapping, waving, joyful jump, victory, defeated, and more (sourced from Mixamo)
+- **Hand & body gestures** — Thumbs up/down, shrug, namaste, pointing, OK sign, and more
+- **Dynamic camera views** — Head close-up, upper body, mid body, and full body — switched automatically by the AI when performing animations
+- **Text & voice input** — Type messages or speak naturally; both are supported within the same session
+- **Multiple voices** — Choose from 8 Gemini voices (Aoede, Charon, Fenrir, Kore, Puck, Leda, Orus, Zephyr)
+- **Multiple avatars** — Ships with 10 Ready Player Me avatar models
+- **Live transcription** — Real-time transcription of both user speech and AI responses displayed in a conversation panel
+- **Docker support** — Dockerfile and docker-compose included for easy deployment
+
+## Architecture
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Audio     │────▶│    STT      │────▶│    LLM      │────▶│    TTS      │
-│   Input     │     │  (Whisper)  │     │  (GPT-4)    │     │ (OpenAI TTS)│
-└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-                                                                      │
-                                                                      ▼
-┌─────────────────────────────────────────────────────────┐  ┌─────────────┐
-│                  TalkingHead Avatar                      │◀─│  Lip-Sync   │
-│                  (3D Ready Player Me)                    │  │  Processing │
-└─────────────────────────────────────────────────────────┘  └─────────────┘
+┌──────────────┐   WebSocket    ┌──────────────────┐   Gemini Live   ┌──────────────┐
+│   Browser    │ ◄────────────► │  Node.js Server  │ ◄─────────────► │  Google      │
+│              │   audio/text   │  (Express + WS)  │   audio/text    │  Gemini API  │
+│  ┌────────┐  │                │                  │   tool calls    │              │
+│  │Three.js│  │                └──────────────────┘                 └──────────────┘
+│  │Avatar  │  │
+│  │+Lipsync│  │
+│  └────────┘  │
+└──────────────┘
 ```
 
-## 📋 Prerequisites
+1. **Browser** captures microphone audio, streams PCM via WebSocket to the server
+2. **Node.js server** relays audio to Gemini Live API and receives audio responses + tool calls
+3. **Gemini** responds with spoken audio, transcriptions, and function calls (`set_mood`, `play_gesture`, `play_animation`, `set_camera_view`)
+4. **Browser** plays audio through TalkingHead's streaming pipeline for real-time lip-sync, and executes tool calls to animate the avatar
 
-- Node.js 18+ 
-- OpenAI API key ([Get one here](https://platform.openai.com/api-keys))
-- Modern web browser with microphone access
-- (Optional) Docker for containerized deployment
+## Quick Start
 
-## 🚀 Quick Start
+### Prerequisites
 
-### 1. Clone and Install
+- [Node.js](https://nodejs.org/) 18 or later
+- A [Google Gemini API key](https://aistudio.google.com/apikey)
+
+### 1. Clone & Install
 
 ```bash
-cd talking-avatar-chatbot
+git clone <repository-url>
+cd talkinghead
 npm install
 ```
 
 ### 2. Configure Environment
 
-Copy `.env.example` to `.env` and add your OpenAI API key:
+Create a `.env` file in the project root:
 
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
 ```env
-OPENAI_API_KEY=your_openai_api_key_here
-JWT_SECRET=your_random_secret_key_here
+GEMINI_API_KEY=your-gemini-api-key-here
 PORT=3000
 WS_PORT=8080
 ```
 
-### 3. Run the Application
+### 3. Install TalkingHead Library
 
-**Development mode:**
+The [TalkingHead](https://github.com/met4citizen/TalkingHead) module must be placed manually:
+
+1. Download from https://github.com/met4citizen/TalkingHead
+2. Copy `talkinghead.mjs` (and accompanying lip-sync/module files) into `public/modules/`
+
+See [`public/modules/README.md`](public/modules/README.md) for detailed instructions.
+
+### 4. Start the Server
+
+**Development** (auto-reload with nodemon):
+
 ```bash
 npm run dev
 ```
 
-**Production mode:**
+**Production**:
+
 ```bash
 npm start
 ```
 
-### 4. Open in Browser
+### 5. Open in Browser
 
-Navigate to `http://localhost:3000`
+Navigate to **http://localhost:3000**. Click **Start Session**, allow microphone access, and start talking!
 
-## 🐳 Docker Deployment
+> **Windows users:** You can also run `npm run setup` (or `powershell -File start.ps1`) for a guided setup wizard.
 
-### Using Docker Compose (Recommended)
-
-```bash
-# Build and start
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
-```
-
-### Using Docker Directly
-
-```bash
-# Build image
-docker build -t talking-avatar .
-
-# Run container
-docker run -p 3000:3000 -p 8080:8080 \
-  -e OPENAI_API_KEY=your_key_here \
-  -e JWT_SECRET=your_secret_here \
-  talking-avatar
-```
-
-## 📁 Project Structure
+## Project Structure
 
 ```
-talking-avatar/
-├── server/                     # Backend server
-│   ├── server.js              # Main Express server
-│   ├── websocket-handler.js   # WebSocket streaming handler
-│   ├── auth.js                # Authentication middleware
-│   └── rate-limiter.js        # Rate limiting configuration
-├── public/                    # Frontend files
-│   ├── index.html            # Main HTML file
+talkinghead/
+├── server/
+│   ├── server.js              # Express + WebSocket server, Gemini Live integration
+│   ├── auth.js                # JWT authentication middleware
+│   ├── rate-limiter.js        # Express rate limiting
+│   └── websocket-handler.js   # WebSocket streaming handler
+├── public/
+│   ├── index.html             # Main UI
 │   ├── css/
-│   │   └── styles.css        # Styling
+│   │   └── styles.css         # Application styles
 │   ├── js/
-│   │   ├── app.js            # Main application logic
-│   │   ├── audio-processor.js       # Audio capture/processing
-│   │   ├── openai-integration.js    # OpenAI API client
-│   │   ├── avatar-controller.js     # Avatar control
-│   │   ├── avatar-behaviors.js      # Avatar animations
-│   │   ├── error-handler.js         # Error handling
-│   │   ├── performance-optimizer.js # Performance tuning
-│   │   └── streaming-handler.js     # Streaming management
-│   └── modules/
-│       └── talkinghead.mjs   # TalkingHead library (add manually)
-├── uploads/                   # Temporary audio uploads
+│   │   ├── app.js             # Main application bootstrap & session management
+│   │   ├── animation-library.js   # Animation definitions & loader
+│   │   ├── audio-processor.js     # Microphone capture & PCM encoding
+│   │   ├── avatar-behaviors.js    # Idle behaviors & emotional reactions
+│   │   ├── avatar-controller.js   # Avatar control API (moods, gestures, animations)
+│   │   ├── avatar-fix.js         # TalkingHead compatibility patches
+│   │   ├── error-handler.js      # User-facing error display
+│   │   ├── performance-optimizer.js  # Device-adaptive quality settings
+│   │   └── streaming-handler.js  # Audio streaming & lip-sync pipeline
+│   ├── avatars/               # Ready Player Me .glb avatar models
+│   ├── animations/            # Mixamo FBX animation files
+│   └── modules/               # TalkingHead library & lip-sync modules
+├── .env                       # Environment variables (not committed)
 ├── package.json
-├── .env.example
 ├── Dockerfile
 ├── docker-compose.yml
-└── README.md
+└── start.ps1                  # Windows setup wizard (PowerShell)
 ```
 
-## 🎮 Usage
-
-### Basic Conversation
-
-1. Click **"Start Talking"** button
-2. Speak into your microphone
-3. Click **"Stop"** when finished speaking
-4. Watch the avatar respond with lip-synced animation
-
-### Voice Selection
-
-Choose from 6 OpenAI voices:
-- **Alloy** - Neutral, balanced voice
-- **Echo** - Warm, conversational
-- **Fable** - British English accent
-- **Onyx** - Deep, authoritative
-- **Nova** - Friendly, expressive
-- **Shimmer** - Soft, gentle
-
-### Avatar Moods
-
-Control the avatar's emotional expression:
-- Neutral
-- Happy
-- Sad
-- Angry
-- Love
-
-## 🔧 Configuration
+## Configuration
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OPENAI_API_KEY` | Your OpenAI API key | Required |
-| `PORT` | HTTP server port | 3000 |
-| `WS_PORT` | WebSocket server port | 8080 |
-| `JWT_SECRET` | Secret for JWT tokens | Required for auth |
-| `GPT_MODEL` | GPT model to use | gpt-4 |
-| `TTS_MODEL` | TTS model to use | tts-1 |
-| `TTS_VOICE` | Default voice | alloy |
-| `WHISPER_MODEL` | Whisper model | whisper-1 |
+| Variable | Default | Description |
+|---|---|---|
+| `GEMINI_API_KEY` | *(required)* | Your Google Gemini API key |
+| `GEMINI_MODEL` | `gemini-2.5-flash-native-audio-preview-12-2025` | Gemini model to use |
+| `PORT` | `3000` | HTTP server port |
+| `WS_PORT` | `8080` | WebSocket server port |
+| `NODE_ENV` | `development` | Environment (`development` or `production`) |
+| `ALLOWED_ORIGINS` | `*` | Comma-separated CORS origins |
 
-### Performance Optimization
+### Avatar Models
 
-The app automatically adjusts quality based on device capabilities:
+The project includes 10 Ready Player Me avatars in `public/avatars/`:
 
-- **Low-end devices**: Reduced FPS and resolution
-- **Mobile devices**: Optimized for battery life
-- **Desktop**: Full quality rendering
+| Model | File |
+|---|---|
+| Brunette (default) | `brunette.glb` |
+| Stevo | `stevo.glb` |
+| Evo Black | `evo-black.glb` |
+| Evo Boss | `evo-boss.glb` |
+| Evo Glasses | `evo-glasses.glb` |
+| Evo Hair | `evo-hair.glb` |
+| Evo Jacket | `evo-jacket.glb` |
+| Evo Normal | `evo-normal.glb` |
+| Evo Pony Tail | `evo-pony-tail.glb` |
+| Evo White | `evo-white.glb` |
 
-## 📡 API Endpoints
-
-### POST `/api/stt`
-Convert speech to text
-- **Body**: `audio` (file upload)
-- **Response**: `{ text: string }`
-
-### POST `/api/chat`
-Get chat completion
-- **Body**: `{ messages: array, stream: boolean }`
-- **Response**: `{ content: string }` or SSE stream
-
-### POST `/api/tts`
-Convert text to speech
-- **Body**: `{ text: string, voice: string }`
-- **Response**: `{ audio: base64, timestamps: array }`
-
-### POST `/api/voice-chain`
-Complete voice pipeline (STT → LLM → TTS)
-- **Body**: `audio` (file upload), `history` (optional)
-- **Response**: `{ userMessage, assistantMessage, audio, timestamps }`
-
-### GET `/api/health`
-Health check
-- **Response**: `{ status: string, services: object }`
-
-## 🔒 Security Features
-
-- **Rate Limiting**: Prevents API abuse
-- **JWT Authentication**: Optional token-based auth
-- **CORS Protection**: Configurable origins
-- **Input Validation**: Sanitized user inputs
-- **Error Handling**: Graceful error recovery
-
-## 🎨 Customization
-
-### Use Your Own Avatar
-
-Replace the default avatar URL in `app.js`:
+To change the default avatar, edit the `url` in `public/js/app.js`:
 
 ```javascript
 await this.head.showAvatar({
-  url: 'path/to/your/avatar.glb',  // Your custom GLB model
-  body: 'F',  // or 'M'
-  avatarMood: 'happy',
-  lipsyncLang: 'en'
+  url: './avatars/your-avatar.glb',
+  body: 'F',
+  // ...
 });
 ```
 
-Create custom avatars at [Ready Player Me](https://readyplayer.me/)
+You can create custom avatars at [readyplayer.me](https://readyplayer.me/).
 
-### Add Custom Behaviors
+### Animations
 
-Extend `avatar-behaviors.js`:
+Full-body animations (Mixamo FBX files) are stored in `public/animations/`. Included animations:
 
-```javascript
-performCustomAction() {
-  this.controller.playGesture('wave', 2);
-  this.controller.speakEmoji('👋');
-}
-```
+| Animation | File | Description |
+|---|---|---|
+| Waving | `Waving.fbx` | Friendly wave |
+| Breakdance | `Breakdance 1990.fbx` | Breakdance move |
+| Cheering | `Cheering.fbx` | Excited cheering |
+| Clapping | `Clapping.fbx` | Applause |
+| Defeated | `Defeated.fbx` | Dejected posture |
+| Joyful Jump | `Joyful Jump.fbx` | Happy jump |
+| Looking | `Looking.fbx` | Looking around |
+| Pointing | `Pointing.fbx` | Pointing gesture |
+| Praying | `Praying.fbx` | Prayer/gratitude |
+| Victory | `Victory.fbx` | Triumph pose |
 
-## 🐛 Troubleshooting
+See [`public/animations/README.md`](public/animations/README.md) for instructions on adding new animations from Mixamo.
 
-### Microphone Not Working
-- Ensure browser has microphone permissions
-- Use HTTPS in production (required for mic access)
-- Check browser console for errors
+## AI Tool Calling
 
-### Avatar Not Loading
-- Verify internet connection (loads from CDN)
-- Check browser WebGL support
-- Try refreshing the page
+Gemini autonomously controls the avatar through function calling. The following tools are available to the AI during conversation:
 
-### No Audio Output
-- Check system volume settings
-- Verify OpenAI API key is valid
-- Check browser console for errors
+| Tool | Parameters | Description |
+|---|---|---|
+| `set_mood` | `mood`: happy, sad, neutral, angry, love | Changes the avatar's facial expression |
+| `play_gesture` | `gesture`: handup, index, ok, thumbup, thumbdown, side, shrug, namaste | Performs a hand/body gesture |
+| `play_animation` | `animation`: waving, breakdance, cheering, clapping, defeated, joyful, looking, pointing, praying, victory | Plays a full-body animation |
+| `set_camera_view` | `view`: head, upper, mid, full | Changes the camera framing |
 
-### WebSocket Connection Failed
-- Ensure port 8080 is not blocked
-- Check firewall settings
-- Verify WS_PORT environment variable
+The AI uses these tools contextually — waving when greeting, showing joy for good news, shrugging when uncertain, switching to full-body view before dancing, and so on.
 
-## 📊 Performance Tips
+## Docker Deployment
 
-1. **Use faster models for lower latency**:
-   - `gpt-3.5-turbo` instead of `gpt-4`
-   - `tts-1` instead of `tts-1-hd`
-
-2. **Optimize avatar settings** for low-end devices:
-   ```javascript
-   modelFPS: 15,  // Reduce from 30
-   modelPixelRatio: 0.5  // Reduce from 1
-   ```
-
-3. **Enable caching** for repeated responses
-
-4. **Use WebSocket streaming** for real-time interaction
-
-## 🧪 Testing
+### Build & Run
 
 ```bash
-# Run basic tests
-npm test
-
-# Test specific endpoint
-curl http://localhost:3000/api/health
+docker-compose up -d
 ```
 
-## 📝 License
+Or manually:
 
-MIT License - feel free to use in your projects!
+```bash
+docker build -t talking-avatar .
+docker run -d -p 3000:3000 -p 8080:8080 \
+  -e GEMINI_API_KEY=your-key \
+  talking-avatar
+```
 
-## 🤝 Contributing
+The container includes a health check at `/api/health`.
 
-Contributions welcome! Please:
+## API Endpoints
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/health` | Server health check — returns Gemini status & WebSocket client count |
+| `WS` | `ws://host:8080` | WebSocket for real-time audio/text streaming |
 
-## 📚 Resources
+### WebSocket Message Types
 
-- [TalkingHead GitHub](https://github.com/met4citizen/TalkingHead)
-- [OpenAI API Documentation](https://platform.openai.com/docs)
-- [Ready Player Me](https://readyplayer.me/)
-- [Three.js Documentation](https://threejs.org/docs/)
+**Client → Server:**
 
-## ⚠️ Important Notes
+| Type | Payload | Description |
+|---|---|---|
+| `start_session` | `{ voice }` | Start a Gemini Live session |
+| `audio_chunk` | `{ data }` | Base64 PCM audio from mic |
+| `text_message` | `{ text }` | Text message input |
+| `tool_response` | `{ id, name, result }` | Response to a tool call |
+| `stop_session` | — | End the session |
 
-1. **OpenAI API Costs**: This application uses OpenAI's paid APIs. Monitor your usage to avoid unexpected charges.
+**Server → Client:**
 
-2. **TalkingHead Library**: You need to download the TalkingHead library manually and place it in `public/modules/talkinghead.mjs`. Get it from the [official repository](https://github.com/met4citizen/TalkingHead).
+| Type | Payload | Description |
+|---|---|---|
+| `session_started` | — | Session is active |
+| `audio_chunk` | `{ data, mimeType }` | AI audio response (PCM) |
+| `output_transcription` | `{ text }` | Transcript of AI speech |
+| `input_transcription` | `{ text }` | Transcript of user speech |
+| `tool_call` | `{ id, name, args }` | Avatar control command |
+| `turn_complete` | — | AI finished speaking |
+| `interrupted` | — | User interrupted the AI |
+| `session_ended` | `{ reason }` | Session closed |
+| `error` | `{ message }` | Error message |
 
-3. **Avatar Models**: The default avatar loads from Ready Player Me CDN. For production, host your own avatar models.
+## Troubleshooting
 
-4. **HTTPS Required**: For microphone access in production, you must use HTTPS.
+| Problem | Solution |
+|---|---|
+| `GEMINI_API_KEY is not set` | Create a `.env` file with your API key |
+| `Failed to resolve module specifier 'talkinghead'` | Download the TalkingHead library to `public/modules/` |
+| Port already in use | Change `PORT` or `WS_PORT` in `.env` |
+| No audio / microphone not working | Ensure HTTPS in production (required for `getUserMedia`); check browser permissions |
+| Avatar not loading | Check browser console; verify `.glb` files exist in `public/avatars/` |
+| WebSocket disconnects | Check that port 8080 is accessible; look at server logs for Gemini errors |
 
-## 🎯 Roadmap
+## Tech Stack
 
-- [ ] Emotion detection from speech tone
-- [ ] Multi-language support
-- [ ] Custom voice cloning
-- [ ] Gesture recognition
-- [ ] Avatar customization UI
-- [ ] Mobile app version
-- [ ] Background environment selection
-- [ ] Recording/playback of conversations
+- **Backend:** Node.js, Express, WebSocket (`ws`)
+- **AI:** Google Gemini Live API (`@google/genai`)
+- **3D Rendering:** Three.js (via CDN)
+- **Avatar Engine:** [TalkingHead](https://github.com/met4citizen/TalkingHead) by met4citizen
+- **Avatar Models:** [Ready Player Me](https://readyplayer.me/)
+- **Animations:** [Mixamo](https://www.mixamo.com/)
+- **Auth:** JSON Web Tokens (`jsonwebtoken`)
+- **Rate Limiting:** `express-rate-limit`
 
-## 💬 Support
+## License
 
-For issues and questions:
-- GitHub Issues: [Create an issue](#)
-- OpenAI Community: [platform.openai.com/community](https://platform.openai.com/community)
-
-## 🙏 Acknowledgments
-
-- TalkingHead library by [met4citizen](https://github.com/met4citizen)
-- OpenAI for GPT-4, Whisper, and TTS APIs
-- Ready Player Me for 3D avatar technology
-- Three.js for 3D rendering
+This project is licensed under the [MIT License](LICENSE).
 
 ---
 
-**Made with ❤️ using OpenAI and TalkingHead**
-#   a g e n t i c - a v a t a r  
- 
+**Powered by Google Gemini Live API & TalkingHead**
+

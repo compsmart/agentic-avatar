@@ -64,13 +64,13 @@
                         <line x1="12" y1="19" x2="12" y2="23"></line>
                         <line x1="8" y1="23" x2="16" y2="23"></line>
                     </svg>
-                    Start Talking
+                    Start Session
                 </button>
                 <button id="stop-conversation" class="btn btn-secondary" disabled>
                     <svg class="icon" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
                         <rect x="6" y="6" width="12" height="12"></rect>
                     </svg>
-                    Stop
+                    End Session
                 </button>
                 <button id="clear-conversation" class="btn btn-tertiary">
                     <svg class="icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -99,16 +99,18 @@
                 </button>
             </div>
 
-            <!-- Voice Settings -->
+            <!-- Settings -->
             <div class="settings-group">
-                <label for="voice-select">Voice:</label>
-                <select id="voice-select" class="select">
-                    <option value="alloy">Alloy</option>
-                    <option value="echo">Echo</option>
-                    <option value="fable">Fable</option>
-                    <option value="onyx">Onyx</option>
-                    <option value="nova">Nova</option>
-                    <option value="shimmer">Shimmer</option>
+                <label for="gemini-voice">Voice:</label>
+                <select id="gemini-voice" class="select">
+                    <option value="Aoede" selected>Aoede (Bright)</option>
+                    <option value="Charon">Charon (Firm)</option>
+                    <option value="Fenrir">Fenrir (Excitable)</option>
+                    <option value="Kore">Kore (Firm)</option>
+                    <option value="Puck">Puck (Upbeat)</option>
+                    <option value="Leda">Leda (Youthful)</option>
+                    <option value="Orus">Orus (Firm)</option>
+                    <option value="Zephyr">Zephyr (Bright)</option>
                 </select>
 
                 <label for="avatar-mood">Mood:</label>
@@ -171,6 +173,18 @@
                 </div>
             </div>
 
+            <!-- Lipsync Test -->
+            <div class="animation-test-section">
+                <h4>👄 Lipsync Test</h4>
+                <div class="animation-controls">
+                    <button id="test-speak-text" class="btn btn-secondary">🗣️ speakText</button>
+                    <button id="test-viseme-push" class="btn btn-secondary">👁️ Push Visemes</button>
+                    <button id="test-morph-aa" class="btn btn-secondary">😮 Morph AA</button>
+                    <button id="test-morph-reset" class="btn btn-tertiary">😐 Reset Lips</button>
+                </div>
+                <div id="lipsync-test-status" class="animation-status"></div>
+            </div>
+
             <!-- Audio Level Indicator -->
             <div id="audio-level-container">
                 <label>Audio Level:</label>
@@ -198,7 +212,7 @@
 
     <!-- Footer -->
     <footer>
-        <p>Powered by OpenAI & TalkingHead | 
+        <p>Powered by Gemini Live API & TalkingHead | 
         <span id="connection-status" class="connection-status">
             <span class="dot"></span> Disconnected
         </span>

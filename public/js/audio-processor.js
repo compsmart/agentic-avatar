@@ -1,168 +1,184 @@
+/**
+ * AudioProcessor - Captures raw 16kHz mono PCM from the microphone
+ * and streams base64-encoded chunks over a callback.
+ *
+ * Uses ScriptProcessorNode for broad browser compatibility.
+ * The mic runs at the browser's native sample rate and is
+ * down-sampled to 16 kHz before sending.
+ */
 export class AudioProcessor {
   constructor() {
-    this.mediaRecorder = null;
     this.audioContext = null;
-    this.analyser = null;
-    this.chunks = [];
     this.stream = null;
+    this.sourceNode = null;
+    this.processorNode = null;
+    this.analyser = null;
+    this.isCapturing = false;
+    this.onChunkCallback = null;
+    this.onLevelCallback = null;
   }
-  
+
   async init() {
+    // AudioContext is created lazily in startCapture to respect autoplay policy
+    console.log('AudioProcessor initialized (lazy)');
+  }
+
+  /**
+   * Start capturing mic audio and streaming PCM chunks.
+   * @param {WebSocket} ws - WebSocket to send chunks on (or null)
+   * @param {Function} onChunk - Called with base64 PCM string for each chunk
+   * @param {Function} onLevel - Called with audio level 0-100
+   */
+  async startCapture(onChunk, onLevel) {
+    if (this.isCapturing) return;
+
+    this.onChunkCallback = onChunk;
+    this.onLevelCallback = onLevel;
+
+    // Get mic stream
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        sampleRate: 16000  // hint, browser may ignore
+      }
+    });
+
+    // Create audio context at whatever sample rate the browser gives us
     this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    console.log('Audio processor initialized');
-  }
-  
-  async startRecording(onDataCallback, onLevelCallback) {
-    try {
-      // Request microphone access
-      this.stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        } 
-      });
-      
-      // Check for supported mime types - prefer WAV or formats compatible with OpenAI Whisper
-      let mimeType;
-      const preferredTypes = [
-        'audio/wav',
-        'audio/wave',
-        'audio/mp4',
-        'audio/mpeg',
-        'audio/webm;codecs=pcm',
-        'audio/webm'
-      ];
-      
-      for (const type of preferredTypes) {
-        if (MediaRecorder.isTypeSupported(type)) {
-          mimeType = type;
-          break;
-        }
-      }
-      
-      if (!mimeType) {
-        throw new Error('No supported audio format found in your browser');
-      }
-      
-      console.log('🎤 Using audio format:', mimeType);
-      
-      const options = { 
-        mimeType,
-        audioBitsPerSecond: 128000 // 128kbps for better quality
-      };
-      this.mediaRecorder = new MediaRecorder(this.stream, options);
-      
-      this.chunks = [];
-      
-      this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          console.log('📦 Audio chunk received:', event.data.size, 'bytes');
-          this.chunks.push(event.data);
-        }
-      };
-      
-      this.mediaRecorder.onstop = () => {
-        console.log('⏹️ MediaRecorder stopped. Total chunks:', this.chunks.length);
-        const blob = new Blob(this.chunks, { type: mimeType });
-        console.log('📦 Final blob created:', blob.size, 'bytes, type:', blob.type);
-        if (onDataCallback) {
-          onDataCallback(blob);
-        }
-        this.chunks = [];
-      };
-      
-      // Start recording with timeslice for consistent chunks
-      // Using timeslice ensures data is available even for short recordings
-      this.mediaRecorder.start(100); // Request data every 100ms
-      
-      // Setup audio analyser for visual feedback
-      if (onLevelCallback) {
-        this.setupAnalyser(this.stream, onLevelCallback);
-      }
-      
-      console.log('🎤 Recording started with mimetype:', mimeType);
-      return true;
-    } catch (error) {
-      console.error('Error starting recording:', error);
-      throw error;
-    }
-  }
-  
-  stopRecording() {
-    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-      this.mediaRecorder.stop();
-      console.log('Recording stopped');
-    }
-    
-    if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
-      this.stream = null;
-    }
-  }
-  
-  setupAnalyser(stream, onLevelCallback) {
-    const source = this.audioContext.createMediaStreamSource(stream);
+    const nativeSampleRate = this.audioContext.sampleRate;
+    console.log(`Mic native sample rate: ${nativeSampleRate} Hz`);
+
+    this.sourceNode = this.audioContext.createMediaStreamSource(this.stream);
+
+    // Analyser for level metering
     this.analyser = this.audioContext.createAnalyser();
     this.analyser.fftSize = 256;
-    
-    source.connect(this.analyser);
-    
-    // Monitor audio levels
-    this.monitorAudioLevels(onLevelCallback);
-  }
-  
-  monitorAudioLevels(callback) {
-    const bufferLength = this.analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    
-    const checkLevel = () => {
-      if (!this.analyser) return;
-      
-      this.analyser.getByteFrequencyData(dataArray);
-      
-      // Calculate average volume (0-100)
-      const average = dataArray.reduce((a, b) => a + b) / bufferLength;
-      const level = Math.min(100, (average / 128) * 100);
-      
-      callback(level);
-      
-      if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-        requestAnimationFrame(checkLevel);
+    this.sourceNode.connect(this.analyser);
+
+    // ScriptProcessor to get raw Float32 samples
+    // bufferSize 4096 at 48kHz ~ 85ms chunks
+    const BUFFER_SIZE = 4096;
+    this.processorNode = this.audioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
+
+    this.processorNode.onaudioprocess = (e) => {
+      if (!this.isCapturing) return;
+
+      const inputData = e.inputBuffer.getChannelData(0);
+
+      // Downsample to 16kHz
+      const pcm16k = this._downsample(inputData, nativeSampleRate, 16000);
+
+      // Convert Float32 -> Int16
+      const int16 = this._float32ToInt16(pcm16k);
+
+      // Convert to base64
+      const base64 = this._arrayBufferToBase64(int16.buffer);
+
+      if (this.onChunkCallback) {
+        this.onChunkCallback(base64);
       }
     };
-    
-    checkLevel();
-  }
-  
-  async base64ToAudioBuffer(base64) {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
+
+    this.sourceNode.connect(this.processorNode);
+    this.processorNode.connect(this.audioContext.destination); // required for ScriptProcessor
+
+    this.isCapturing = true;
+
+    // Start level monitoring
+    if (this.onLevelCallback) {
+      this._monitorLevels();
     }
-    
-    return await this.audioContext.decodeAudioData(bytes.buffer);
+
+    console.log('Mic capture started (16kHz PCM streaming)');
   }
-  
-  async blobToBase64(blob) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = reader.result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  }
-  
-  cleanup() {
-    this.stopRecording();
+
+  stopCapture() {
+    this.isCapturing = false;
+
+    if (this.processorNode) {
+      this.processorNode.disconnect();
+      this.processorNode = null;
+    }
+    if (this.sourceNode) {
+      this.sourceNode.disconnect();
+      this.sourceNode = null;
+    }
+    if (this.stream) {
+      this.stream.getTracks().forEach(t => t.stop());
+      this.stream = null;
+    }
     if (this.audioContext) {
       this.audioContext.close();
       this.audioContext = null;
     }
     this.analyser = null;
+    this.onChunkCallback = null;
+    this.onLevelCallback = null;
+
+    console.log('Mic capture stopped');
+  }
+
+  // --- Internal helpers ---
+
+  _downsample(float32Array, fromRate, toRate) {
+    if (fromRate === toRate) return float32Array;
+    const ratio = fromRate / toRate;
+    const newLength = Math.round(float32Array.length / ratio);
+    const result = new Float32Array(newLength);
+    for (let i = 0; i < newLength; i++) {
+      const srcIndex = i * ratio;
+      const low = Math.floor(srcIndex);
+      const high = Math.min(low + 1, float32Array.length - 1);
+      const frac = srcIndex - low;
+      result[i] = float32Array[low] * (1 - frac) + float32Array[high] * frac;
+    }
+    return result;
+  }
+
+  _float32ToInt16(float32Array) {
+    const int16 = new Int16Array(float32Array.length);
+    for (let i = 0; i < float32Array.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32Array[i]));
+      int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    return int16;
+  }
+
+  _arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
+  _monitorLevels() {
+    if (!this.analyser || !this.isCapturing) return;
+
+    const bufferLength = this.analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    const check = () => {
+      if (!this.analyser || !this.isCapturing) return;
+
+      this.analyser.getByteFrequencyData(dataArray);
+      const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+      const level = Math.min(100, (average / 128) * 100);
+
+      if (this.onLevelCallback) {
+        this.onLevelCallback(level);
+      }
+
+      requestAnimationFrame(check);
+    };
+
+    check();
+  }
+
+  cleanup() {
+    this.stopCapture();
   }
 }

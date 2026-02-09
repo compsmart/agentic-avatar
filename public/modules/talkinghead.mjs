@@ -712,16 +712,16 @@ class TalkingHead {
     this.mtMaxDefault = 1;
     this.mtMaxExceptions = {};
     this.mtLimits = {
-      eyeBlinkLeft: (v) => ( Math.max(v, ( this.mtAvatar['eyesLookDown'].value + this.mtAvatar['browDownLeft'].value ) / 2) ),
-      eyeBlinkRight: (v) => ( Math.max(v, ( this.mtAvatar['eyesLookDown'].value + this.mtAvatar['browDownRight'].value ) / 2 ) )
+      eyeBlinkLeft: (v) => ( Math.max(v, ( (this.mtAvatar['eyesLookDown']?.value || 0) + (this.mtAvatar['browDownLeft']?.value || 0) ) / 2) ),
+      eyeBlinkRight: (v) => ( Math.max(v, ( (this.mtAvatar['eyesLookDown']?.value || 0) + (this.mtAvatar['browDownRight']?.value || 0) ) / 2 ) )
     };
     this.mtOnchange = {
       eyesLookDown: () => {
-        this.mtAvatar['eyeBlinkLeft'].needsUpdate = true;
-        this.mtAvatar['eyeBlinkRight'].needsUpdate = true;
+        if (this.mtAvatar['eyeBlinkLeft']) this.mtAvatar['eyeBlinkLeft'].needsUpdate = true;
+        if (this.mtAvatar['eyeBlinkRight']) this.mtAvatar['eyeBlinkRight'].needsUpdate = true;
       },
-      browDownLeft: () => { this.mtAvatar['eyeBlinkLeft'].needsUpdate = true; },
-      browDownRight: () => { this.mtAvatar['eyeBlinkRight'].needsUpdate = true; }
+      browDownLeft: () => { if (this.mtAvatar['eyeBlinkLeft']) this.mtAvatar['eyeBlinkLeft'].needsUpdate = true; },
+      browDownRight: () => { if (this.mtAvatar['eyeBlinkRight']) this.mtAvatar['eyeBlinkRight'].needsUpdate = true; }
     };
     this.mtRandomized = [
       'mouthDimpleLeft','mouthDimpleRight', 'mouthLeft', 'mouthPressLeft',
@@ -2565,16 +2565,16 @@ class TalkingHead {
       e.y = Math.max(-0.9,Math.min(0.9, -2.5 * e.y));
 
       if ( isEyeContact ) {
-        Object.assign( this.mtAvatar['eyesLookDown'], { system: e.x < 0 ? -e.x : 0, needsUpdate: true });
-        Object.assign( this.mtAvatar['eyesLookUp'], { system: e.x < 0 ? 0 : e.x, needsUpdate: true });
-        Object.assign( this.mtAvatar['eyeLookInLeft'], { system: e.y < 0 ? -e.y : 0, needsUpdate: true });
-        Object.assign( this.mtAvatar['eyeLookOutLeft'], { system: e.y < 0 ? 0 : e.y, needsUpdate: true });
-        Object.assign( this.mtAvatar['eyeLookInRight'], { system: e.y < 0 ? 0 : e.y, needsUpdate: true });
-        Object.assign( this.mtAvatar['eyeLookOutRight'], { system: e.y < 0 ? -e.y : 0, needsUpdate: true });
+        if (this.mtAvatar['eyesLookDown']) Object.assign( this.mtAvatar['eyesLookDown'], { system: e.x < 0 ? -e.x : 0, needsUpdate: true });
+        if (this.mtAvatar['eyesLookUp']) Object.assign( this.mtAvatar['eyesLookUp'], { system: e.x < 0 ? 0 : e.x, needsUpdate: true });
+        if (this.mtAvatar['eyeLookInLeft']) Object.assign( this.mtAvatar['eyeLookInLeft'], { system: e.y < 0 ? -e.y : 0, needsUpdate: true });
+        if (this.mtAvatar['eyeLookOutLeft']) Object.assign( this.mtAvatar['eyeLookOutLeft'], { system: e.y < 0 ? 0 : e.y, needsUpdate: true });
+        if (this.mtAvatar['eyeLookInRight']) Object.assign( this.mtAvatar['eyeLookInRight'], { system: e.y < 0 ? 0 : e.y, needsUpdate: true });
+        if (this.mtAvatar['eyeLookOutRight']) Object.assign( this.mtAvatar['eyeLookOutRight'], { system: e.y < 0 ? -e.y : 0, needsUpdate: true });
 
         // Head move
         if ( isHeadMove ) {
-          i = - this.mtAvatar['bodyRotateY'].value;
+          i = - (this.mtAvatar['bodyRotateY']?.value || 0);
           j = this.gaussianRandom(-0.2,0.2);
           this.animQueue.push( this.animFactory({ name: "headmove",
             dt: [[1000,2000],[1000,2000,1,2],[1000,2000],[1000,2000,1,2]], vs: {
@@ -2584,7 +2584,7 @@ class TalkingHead {
         }
 
       } else {
-        i = this.mtAvatar['eyeLookInLeft'].value - this.mtAvatar['eyeLookOutLeft'].value;
+        i = (this.mtAvatar['eyeLookInLeft']?.value || 0) - (this.mtAvatar['eyeLookOutLeft']?.value || 0);
         j = this.gaussianRandom(-0.2,0.2);
         this.animQueue.push( this.animFactory({ name: "headmove",
           dt: [[1000,2000],[1000,2000,1,2],[1000,2000],[1000,2000,1,2]], vs: {
@@ -2604,7 +2604,7 @@ class TalkingHead {
     if ( this.viewName !== 'full' || this.isAvatarOnly) {
       i = this.mtRandomized[ Math.floor( Math.random() * this.mtRandomized.length ) ];
       j = this.mtAvatar[i];
-      if ( !j.needsUpdate ) {
+      if ( j && !j.needsUpdate ) {
         Object.assign(j,{ base: (this.mood.baseline[i] || 0) + ( 1 + vol/255 ) * Math.random() / 5, needsUpdate: true });
       }
     }

@@ -1,5 +1,4 @@
 import { TalkingHead } from 'talkinghead';
-import { OpenAIIntegration } from './openai-integration.js';
 import { AudioProcessor } from './audio-processor.js';
 import { AvatarController } from './avatar-controller.js';
 import { AvatarBehaviors } from './avatar-behaviors.js';
@@ -12,297 +11,270 @@ import * as AnimationLibrary from './animation-library.js';
 class VoiceAvatarApp {
   constructor() {
     this.head = null;
-    this.openai = new OpenAIIntegration();
     this.audioProcessor = new AudioProcessor();
     this.avatarController = null;
     this.avatarBehaviors = null;
     this.streamingHandler = null;
+    this.ws = null;
+    this.isSessionActive = false;
     this.isListening = false;
     this.conversationHistory = [];
-    this.selectedVoice = 'alloy';
-    this.ws = null;
-    
+    this.msgCount = 0;           // for debug logging
+
     this.init();
   }
-  
+
   async init() {
     try {
-      // Show loading
       this.showLoading(true);
       this.updateStatus('Initializing...');
-      
-      // Check server health
+
       await this.checkServerHealth();
-      
-      // Initialize avatar
       await this.initializeAvatar();
-      
-      // Initialize audio processor
       await this.audioProcessor.init();
-      
-      // Initialize controllers
+
       this.avatarController = new AvatarController(this.head);
       await this.avatarController.init();
-      
+
       this.avatarBehaviors = new AvatarBehaviors(this.avatarController);
       this.streamingHandler = new StreamingHandler(this.avatarController);
-      
-      // Start idle behaviors
+
       this.avatarBehaviors.start();
-      
-      // Setup WebSocket connection
-      this.setupWebSocket();
-      
-      // Setup UI controls
       this.setupControls();
-      
-      // Hide loading
+      this.setupWebSocket();
+
       this.showLoading(false);
-      this.updateStatus('Ready to talk!', 'ready');
-      
+      this.updateStatus('Ready — press Start to begin', 'ready');
       ErrorHandler.showSuccess('Avatar initialized successfully!');
-      
-      console.log('✅ Voice Avatar App initialized');
+      console.log('[APP] Voice Avatar App initialized');
     } catch (error) {
       this.showLoading(false);
       this.updateStatus('Initialization failed', 'error');
       ErrorHandler.handle(error, 'Initialization');
     }
   }
-  
+
+  // ----------------------------------------------------------------
+  // Avatar loading
+  // ----------------------------------------------------------------
+
   async initializeAvatar() {
+    const avatarContainer = document.getElementById('avatar-container');
+    if (!avatarContainer) throw new Error('Avatar container not found');
+
+    const settings = PerformanceOptimizer.optimizeAvatarSettings();
+
+    this.head = new TalkingHead(avatarContainer, {
+      ttsLang: 'en-US',
+      lipsyncLang: 'en',
+      cameraView: 'full',
+      modelFPS: settings.modelFPS,
+      modelPixelRatio: settings.modelPixelRatio,
+      cameraDistance: 1.5,
+      cameraY: 0.2,
+      lightAmbientIntensity: 1.5,
+      lightSpotIntensity: 0.5
+    });
+
+    patchTalkingHeadAnimate(this.head);
+
     try {
-      const avatarContainer = document.getElementById('avatar-container');
-      if (!avatarContainer) {
-        throw new Error('Avatar container not found');
-      }
-      
-      // Get optimized settings for device
-      const settings = PerformanceOptimizer.optimizeAvatarSettings();
-      
-      // Initialize TalkingHead with proper options
-      this.head = new TalkingHead(avatarContainer, {
-        ttsLang: "en-US",
-        lipsyncLang: 'en',
-        cameraView: 'full',  // Changed from 'upper' to show full body for animations
-        modelFPS: settings.modelFPS,
-        modelPixelRatio: settings.modelPixelRatio,
-        cameraDistance: 1.5,  // Increased distance to fit full body
-        cameraY: 0.2,  // Lowered camera to center full body better
-        lightAmbientIntensity: 1.5,
-        lightSpotIntensity: 0.5
+      console.log('[APP] Loading avatar...');
+      await this.head.showAvatar({
+        url: './avatars/brunette.glb',
+        body: 'F',
+        avatarMood: 'happy',
+        lipsyncLang: 'en'
       });
-      
-      // Apply animation safety patch
-      patchTalkingHeadAnimate(this.head);
-      
-      // Load default avatar - Using TalkingHead's bundled avatar
-      try {
-        console.log('Loading TalkingHead avatar from repository...');
-        
-        // Use custom avatar from local avatars directory
-        await this.head.showAvatar({
-          url: './avatars/6989d13d6eb4878bb8783487.glb',
-          body: 'F',
-          avatarMood: 'happy',
-          lipsyncLang: 'en'
-        });
-        
-        // Wait for avatar to be fully ready
-        await waitForAvatarReady(this.head);
-        
-        // Ensure avatar is visible and rendering
-        if (this.head.nodeAvatar) {
-          this.head.nodeAvatar.visible = true;
-        }
-        
-        // Start the animation loop if not started
-        if (!this.head.animating) {
-          this.head.start();
-        }
-        
-        // Look at camera to ensure proper positioning
-        setTimeout(() => {
-          if (this.head.lookAtCamera) {
-            this.head.lookAtCamera(1000);
-          }
-        }, 500);
-        
-        console.log('✅ Avatar loaded successfully: Brunette (from TalkingHead repo)');
-      } catch (localError) {
-        console.error('Failed to load local avatar:', localError);
-        console.warn('Trying built-in default avatar...');
-        
-        // Fallback: Use TalkingHead's built-in default
-        try {
-          await this.head.showAvatar({
-            body: 'F',
-            avatarMood: 'happy',
-            lipsyncLang: 'en'
-          });
-          
-          await waitForAvatarReady(this.head);
-          
-          // Ensure avatar is visible
-          if (this.head.nodeAvatar) {
-            this.head.nodeAvatar.visible = true;
-          }
-          
-          // Start animation loop
-          if (!this.head.animating) {
-            this.head.start();
-          }
-          
-          console.log('✅ Avatar loaded: Built-in Default');
-        } catch (defaultError) {
-          console.error('Failed to load built-in default:', defaultError);
-          
-          // Last resort: try without waiting for ready
-          try {
-            console.warn('Trying without waitForAvatarReady...');
-            await this.head.showAvatar({
-              body: 'F',
-              avatarMood: 'happy',
-              lipsyncLang: 'en'
-            });
-            
-            // Ensure visible and start animation
-            if (this.head.nodeAvatar) {
-              this.head.nodeAvatar.visible = true;
-            }
-            if (!this.head.animating) {
-              this.head.start();
-            }
-            
-            console.log('✅ Avatar loaded without waiting for ready state');
-            
-            // Give it a moment to initialize
-            await new Promise(resolve => setTimeout(resolve, 2000));
-          } catch (finalError) {
-            console.error('All avatar loading attempts failed:', finalError);
-            throw new Error('Failed to load avatar. Error: ' + finalError.message);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Avatar initialization error:', error);
-      throw new Error('Failed to load avatar: ' + error.message);
+      await waitForAvatarReady(this.head);
+      if (this.head.nodeAvatar) this.head.nodeAvatar.visible = true;
+      if (!this.head.animating) this.head.start();
+      setTimeout(() => { this.head.lookAtCamera?.(1000); }, 500);
+      console.log('[APP] Avatar loaded successfully');
+    } catch (err) {
+      console.error('[APP] Primary avatar load failed, trying default:', err);
+      await this.head.showAvatar({ body: 'F', avatarMood: 'happy', lipsyncLang: 'en' });
+      await waitForAvatarReady(this.head);
+      if (this.head.nodeAvatar) this.head.nodeAvatar.visible = true;
+      if (!this.head.animating) this.head.start();
     }
   }
-  
+
   async checkServerHealth() {
     try {
-      const health = await this.openai.checkHealth();
-      if (health.status !== 'ok') {
-        throw new Error('Server not healthy');
-      }
-      console.log('✅ Server health check passed');
+      const res = await fetch('/api/health');
+      const data = await res.json();
+      if (data.status !== 'ok') throw new Error('Server not healthy');
+      console.log('[APP] Server health check passed');
     } catch (error) {
-      ErrorHandler.showUserMessage('Warning: Could not connect to server. Some features may not work.', 'warning');
+      ErrorHandler.showUserMessage('Warning: Could not connect to server.', 'warning');
     }
   }
-  
+
+  // ----------------------------------------------------------------
+  // WebSocket
+  // ----------------------------------------------------------------
+
   setupWebSocket() {
-    try {
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsHost = window.location.hostname;
-      const wsPort = 8080; // From .env WS_PORT
-      
-      this.ws = new WebSocket(`${wsProtocol}//${wsHost}:${wsPort}`);
-      
-      this.ws.onopen = () => {
-        console.log('✅ WebSocket connected');
-        this.updateConnectionStatus(true);
-      };
-      
-      this.ws.onmessage = async (event) => {
-        try {
-          const message = JSON.parse(event.data);
-          await this.handleWebSocketMessage(message);
-        } catch (error) {
-          console.error('WebSocket message error:', error);
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = window.location.hostname;
+    const wsPort = 8080;
+    const url = `${wsProtocol}//${wsHost}:${wsPort}`;
+
+    console.log(`[WS] Connecting to ${url}...`);
+    this.ws = new WebSocket(url);
+
+    this.ws.onopen = () => {
+      console.log('[WS] Connected');
+      this.updateConnectionStatus(true);
+    };
+
+    this.ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        this.handleServerMessage(msg);
+      } catch (err) {
+        console.error('[WS] Parse error:', err);
+      }
+    };
+
+    this.ws.onerror = (error) => {
+      console.error('[WS] Error:', error);
+    };
+
+    this.ws.onclose = () => {
+      console.log('[WS] Disconnected');
+      this.updateConnectionStatus(false);
+      this.isSessionActive = false;
+      this.updateSessionUI();
+      setTimeout(() => {
+        if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
+          this.setupWebSocket();
         }
-      };
-      
-      this.ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        ErrorHandler.handle(new Error('WebSocket connection failed'), 'WebSocket');
-      };
-      
-      this.ws.onclose = () => {
-        console.log('WebSocket disconnected');
-        this.updateConnectionStatus(false);
-        
-        // Attempt to reconnect after 5 seconds
-        setTimeout(() => {
-          if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
-            this.setupWebSocket();
-          }
-        }, 5000);
-      };
-    } catch (error) {
-      console.error('WebSocket setup error:', error);
-    }
+      }, 5000);
+    };
   }
-  
-  async handleWebSocketMessage(message) {
-    switch (message.type) {
-      case 'speech_data':
-        await this.handleSpeechData(message.data);
+
+  // ----------------------------------------------------------------
+  // Message handler — all messages from server (Gemini responses)
+  // ----------------------------------------------------------------
+
+  handleServerMessage(msg) {
+    this.msgCount++;
+
+    switch (msg.type) {
+      case 'session_started':
+        console.log('[MSG] Session started');
+        this.isSessionActive = true;
+        this.updateSessionUI();
+        this.updateStatus('Connected to Gemini — start speaking!', 'ready');
+        // Start TalkingHead streaming mode (awaited via promise)
+        this.streamingHandler.startStream().then(() => {
+          console.log('[MSG] Streaming mode ready for audio');
+        }).catch(err => {
+          console.error('[MSG] Failed to start streaming:', err);
+        });
         break;
-      case 'transcript':
-        this.displayTranscript(message.text, 'user');
+
+      case 'setup_complete':
+        console.log('[MSG] Gemini setup complete');
         break;
+
+      case 'audio_chunk':
+        // Feed PCM audio to TalkingHead for playback + lipsync
+        this.streamingHandler.feedAudio(msg.data);
+        this.updateStatus('Speaking...', 'speaking');
+        break;
+
+      case 'output_transcription':
+        // What the AI SPOKE (as text) — use for lipsync + display in conversation
+        console.log(`[MSG] AI transcript: "${msg.text}"`);
+        this.streamingHandler.addText(msg.text);
+        this.appendToTranscript(msg.text, 'assistant-stream');
+        break;
+
+      case 'input_transcription':
+        // What the user SAID (as text) — display in conversation
+        console.log(`[MSG] User transcript: "${msg.text}"`);
+        this.displayTranscript(msg.text, 'user');
+        break;
+
+      case 'text':
+        // Model reasoning/thinking text (NOT spoken) — display only, do NOT use for lipsync
+        console.log(`[MSG] Model text (not spoken): "${msg.text.substring(0, 80)}..."`);
+        // Don't send to streamingHandler — this is thinking text, not audio
+        break;
+
+      case 'tool_call':
+        console.log(`[MSG] Tool call: ${msg.name}`, msg.args);
+        this.handleToolCall(msg);
+        break;
+
+      case 'interrupted':
+        console.log('[MSG] Interrupted by user');
+        this.streamingHandler.interrupt();
+        this.flushAssistantStream();
+        this.updateStatus('Listening...', 'listening');
+        break;
+
+      case 'turn_complete':
+        console.log('[MSG] Turn complete');
+        this.updateStatus('Listening...', 'listening');
+        this.avatarBehaviors.onSpeakingEnd();
+        this.flushAssistantStream();
+        break;
+
+      case 'session_ended':
+        console.log('[MSG] Session ended. Reason:', msg.reason || 'none');
+        this.isSessionActive = false;
+        this.updateSessionUI();
+        this.streamingHandler.stopStream();
+        this.updateStatus('Session ended', 'ready');
+        break;
+
       case 'error':
-        ErrorHandler.showUserMessage(message.message, 'error');
+        console.error('[MSG] Error from server:', msg.message);
+        ErrorHandler.showUserMessage(msg.message, 'error');
         break;
-      case 'ack':
-        console.log('Server acknowledged:', message.message);
-        break;
+
       default:
-        console.log('Unknown message type:', message.type);
+        console.log('[MSG] Unknown:', msg.type, msg);
     }
   }
-  
-  async handleSpeechData(speechData) {
-    try {
-      const { audio, timestamps, text } = speechData;
-      
-      // Display response
-      this.displayTranscript(text, 'assistant');
-      this.displayResponse(text);
-      
-      // Update status
-      this.updateStatus('Speaking...', 'speaking');
-      this.avatarBehaviors.onSpeakingStart();
-      
-      // Play audio with lip-sync
-      await this.avatarController.speak(audio, timestamps, text);
-      
-      // Update status
-      this.updateStatus('Ready to talk!', 'ready');
-      this.avatarBehaviors.onSpeakingEnd();
-      
-    } catch (error) {
-      ErrorHandler.handle(error, 'Speech playback');
-    }
+
+  // ----------------------------------------------------------------
+  // Tool calls
+  // ----------------------------------------------------------------
+
+  handleToolCall(msg) {
+    const result = this.avatarController.handleToolCall(msg.name, msg.args || {});
+    console.log(`[TOOL] ${msg.name} → ${result}`);
+
+    this.wsSend({
+      type: 'tool_response',
+      id: msg.id,
+      name: msg.name,
+      result
+    });
   }
-  
+
+  // ----------------------------------------------------------------
+  // Controls
+  // ----------------------------------------------------------------
+
   setupControls() {
     const startBtn = document.getElementById('start-conversation');
     const stopBtn = document.getElementById('stop-conversation');
     const clearBtn = document.getElementById('clear-conversation');
-    const voiceSelect = document.getElementById('voice-select');
     const moodSelect = document.getElementById('avatar-mood');
     const cameraViewSelect = document.getElementById('camera-view');
     const textInput = document.getElementById('text-input');
     const sendBtn = document.getElementById('send-text-btn');
-    
-    startBtn.addEventListener('click', () => this.startListening());
-    stopBtn.addEventListener('click', () => this.stopListening());
+
+    startBtn.addEventListener('click', () => this.startSession());
+    stopBtn.addEventListener('click', () => this.stopSession());
     clearBtn.addEventListener('click', () => this.clearConversation());
-    
-    // Text input controls
+
     sendBtn.addEventListener('click', () => this.sendTextMessage());
     textInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -310,87 +282,39 @@ class VoiceAvatarApp {
         this.sendTextMessage();
       }
     });
-    
-    voiceSelect.addEventListener('change', (e) => {
-      this.selectedVoice = e.target.value;
-      console.log('Voice changed to:', this.selectedVoice);
-    });
-    
+
     moodSelect.addEventListener('change', (e) => {
       this.avatarController.setMood(e.target.value);
     });
 
-    // Camera view control
     if (cameraViewSelect) {
       cameraViewSelect.addEventListener('change', (e) => {
         const view = e.target.value;
-        console.log('📷 Changing camera view to:', view);
-        
-        // Set camera parameters based on view
-        let distance, cameraY;
-        switch(view) {
-          case 'head':
-            distance = 0.3;
-            cameraY = 0.2;
-            break;
-          case 'upper':
-            distance = 0.5;
-            cameraY = 0;
-            break;
-          case 'mid':
-            distance = 1.0;
-            cameraY = -0.2;
-            break;
-          case 'full':
-          default:
-            distance = 1.5;
-            cameraY = -0.5;
-            break;
-        }
-        
-        // Apply the view change
-        if (this.head && this.head.lookAtCamera) {
-          this.head.lookAtCamera(1000, distance, 0, cameraY);
-          console.log(`✅ Camera view changed to ${view} (distance: ${distance}, Y: ${cameraY})`);
+        console.log(`[APP] Camera view → ${view}`);
+        if (this.head?.setView) {
+          this.head.setView(view);
         }
       });
     }
 
-    // Animation testing controls
-    const animationSelect = document.getElementById('animation-select');
-    const animationDuration = document.getElementById('animation-duration');
+    // Animation testing
     const playAnimationBtn = document.getElementById('play-animation-btn');
     const stopAnimationBtn = document.getElementById('stop-animation-btn');
+    const animationSelect = document.getElementById('animation-select');
+    const animationDuration = document.getElementById('animation-duration');
     const animationStatus = document.getElementById('animation-status');
 
     if (playAnimationBtn) {
       playAnimationBtn.addEventListener('click', async () => {
-        const selectedAnimation = animationSelect.value;
-        if (!selectedAnimation) {
-          animationStatus.textContent = '⚠️ Please select an animation';
-          animationStatus.className = 'animation-status error';
-          return;
-        }
-
-        const duration = parseInt(animationDuration.value) || null;
-        
+        const sel = animationSelect.value;
+        if (!sel) { animationStatus.textContent = 'Please select an animation'; return; }
+        const dur = parseInt(animationDuration.value) || null;
         try {
-          animationStatus.textContent = `▶️ Playing ${selectedAnimation}...`;
-          animationStatus.className = 'animation-status playing';
-          
-          const success = await this.avatarController.playAnimation(selectedAnimation, duration);
-          
-          if (success) {
-            animationStatus.textContent = `✅ Playing ${selectedAnimation} (${duration || 'default'}s)`;
-            animationStatus.className = 'animation-status playing';
-          } else {
-            animationStatus.textContent = `❌ Failed to play ${selectedAnimation}`;
-            animationStatus.className = 'animation-status error';
-          }
-        } catch (error) {
-          console.error('Animation error:', error);
-          animationStatus.textContent = `❌ Error: ${error.message}`;
-          animationStatus.className = 'animation-status error';
+          animationStatus.textContent = `Playing ${sel}...`;
+          await this.avatarController.playAnimation(sel, dur);
+          animationStatus.textContent = `Playing ${sel} (${dur || 'default'}s)`;
+        } catch (err) {
+          animationStatus.textContent = `Error: ${err.message}`;
         }
       });
     }
@@ -398,341 +322,342 @@ class VoiceAvatarApp {
     if (stopAnimationBtn) {
       stopAnimationBtn.addEventListener('click', () => {
         this.avatarController.stopAnimation();
-        animationStatus.textContent = '⏹️ Animation stopped';
-        animationStatus.className = 'animation-status';
+        if (animationStatus) animationStatus.textContent = 'Animation stopped';
       });
     }
 
-    // Gesture testing controls
-    const gestureButtons = document.querySelectorAll('.btn-gesture');
-    gestureButtons.forEach(btn => {
+    document.querySelectorAll('.btn-gesture').forEach(btn => {
       btn.addEventListener('click', () => {
         const gesture = btn.getAttribute('data-gesture');
-        console.log(`🎭 Playing gesture: ${gesture}`);
         this.avatarController.playGesture(gesture, 2);
-        
-        // Visual feedback
         btn.style.background = '#28a745';
         btn.style.color = 'white';
         btn.style.borderColor = '#28a745';
-        setTimeout(() => {
-          btn.style.background = '';
-          btn.style.color = '';
-          btn.style.borderColor = '';
-        }, 2000);
+        setTimeout(() => { btn.style.background = ''; btn.style.color = ''; btn.style.borderColor = ''; }, 2000);
       });
     });
+
+    // --- Lipsync test buttons ---
+    this._setupLipsyncTests();
   }
-  
-  async startListening() {
-    if (this.isListening) return;
-    
+
+  _setupLipsyncTests() {
+    const status = document.getElementById('lipsync-test-status');
+    const log = (msg) => { if (status) status.textContent = msg; console.log(`[LIP-TEST] ${msg}`); };
+
+    // Test 1: speakText — uses browser TTS + TalkingHead word-to-viseme pipeline
+    document.getElementById('test-speak-text')?.addEventListener('click', () => {
+      log('speakText("Hello, testing lipsync")...');
+      try {
+        this.head.speakText('Hello, testing lipsync.');
+        log('speakText called — watch the avatar');
+      } catch (e) {
+        log(`speakText error: ${e.message}`);
+      }
+    });
+
+    // Test 2: Push raw visemes directly into TalkingHead animQueue
+    document.getElementById('test-viseme-push')?.addEventListener('click', () => {
+      log('Pushing viseme sequence to animQueue...');
+      try {
+        const now = this.head.animClock;
+        const visemeSequence = ['aa', 'E', 'O', 'U', 'I', 'aa', 'PP', 'FF', 'E', 'O'];
+        const DUR = 150; // ms per viseme
+
+        visemeSequence.forEach((v, i) => {
+          const t = now + i * DUR;
+          this.head.animQueue.push({
+            template: { name: 'viseme' },
+            ts: [t, t + DUR * 0.4, t + DUR],
+            vs: {
+              ['viseme_' + v]: [null, (v === 'PP' || v === 'FF') ? 0.9 : 0.7, 0]
+            }
+          });
+        });
+
+        // Set speaking state so volume modulation kicks in
+        this.head.isSpeaking = true;
+        this.head.stateName = 'speaking';
+        setTimeout(() => {
+          this.head.isSpeaking = false;
+          this.head.stateName = 'idle';
+          log('Viseme sequence done');
+        }, visemeSequence.length * DUR + 200);
+
+        log(`Pushed ${visemeSequence.length} visemes starting at animClock=${now.toFixed(0)}`);
+      } catch (e) {
+        log(`Push visemes error: ${e.message}`);
+      }
+    });
+
+    // Test 3: Directly set morph target for viseme_aa (open mouth)
+    document.getElementById('test-morph-aa')?.addEventListener('click', () => {
+      log('Inspecting morph targets...');
+      try {
+        const mt = this.head.mtAvatar;
+        if (!mt) {
+          log('mtAvatar is null/undefined!');
+          return;
+        }
+
+        const allKeys = Object.keys(mt);
+        console.log('[LIP-TEST] ALL mtAvatar keys:', allKeys);
+
+        // Find anything mouth/jaw/lip/viseme related
+        const lipKeys = allKeys.filter(k =>
+          /viseme|mouth|jaw|lip|cheek|tongue|open|smile|frown|aa|ee|oh/i.test(k)
+        );
+        console.log('[LIP-TEST] Lip-related keys:', lipKeys);
+
+        // Also check the 3D mesh for blend shape names
+        const meshes = [];
+        this.head.nodeAvatar?.traverse?.(node => {
+          if (node.morphTargetDictionary) {
+            meshes.push({
+              name: node.name,
+              blendShapes: Object.keys(node.morphTargetDictionary)
+            });
+          }
+        });
+        console.log('[LIP-TEST] Meshes with blend shapes:', JSON.stringify(meshes, null, 2));
+
+        if (lipKeys.length > 0) {
+          // Try to set the first lip-related morph target
+          const key = lipKeys[0];
+          mt[key].value = 1.0;
+          mt[key].newvalue = 1.0;
+          mt[key].needsUpdate = true;
+          log(`Set ${key} = 1.0. Lip keys: ${lipKeys.join(', ')}`);
+        } else {
+          log(`No lip morphs in mtAvatar (${allKeys.length} total keys). Check console for full list & mesh blend shapes.`);
+        }
+      } catch (e) {
+        log(`Morph error: ${e.message}`);
+        console.error('[LIP-TEST]', e);
+      }
+    });
+
+    // Test 4: Reset all lip morph targets
+    document.getElementById('test-morph-reset')?.addEventListener('click', () => {
+      log('Resetting lips...');
+      try {
+        this.head.resetLips();
+        log('resetLips() called');
+      } catch (e) {
+        log(`Reset error: ${e.message}`);
+      }
+    });
+  }
+
+  // ----------------------------------------------------------------
+  // Session lifecycle
+  // ----------------------------------------------------------------
+
+  async startSession() {
+    if (this.isSessionActive) return;
+
     try {
-      this.isListening = true;
-      this.updateStatus('Listening...', 'listening');
-      this.avatarBehaviors.onListeningStart();
-      
-      // Update UI
-      document.getElementById('start-conversation').disabled = true;
-      document.getElementById('stop-conversation').disabled = false;
-      
-      // Start recording
-      await this.audioProcessor.startRecording(
-        (audioBlob) => this.handleRecordingComplete(audioBlob),
-        (level) => this.updateAudioLevel(level)
+      console.log('[APP] Starting session...');
+      this.updateStatus('Connecting to Gemini...', 'processing');
+      this.showLoading(true);
+
+      // Tell server to open a Gemini Live session with selected voice
+      const voiceSelect = document.getElementById('gemini-voice');
+      const voice = voiceSelect ? voiceSelect.value : 'Aoede';
+      console.log(`[APP] Selected voice: ${voice}`);
+      this.wsSend({ type: 'start_session', voice });
+
+      // Start mic capture → stream PCM to server
+      console.log('[APP] Starting mic capture...');
+      await this.audioProcessor.startCapture(
+        (base64pcm) => {
+          this.wsSend({ type: 'audio_chunk', data: base64pcm });
+        },
+        (level) => {
+          this.updateAudioLevel(level);
+        }
       );
-      
-      // Visual feedback
+
+      this.isListening = true;
+      this.showLoading(false);
+      console.log('[APP] Mic capture started, session request sent');
+      this.avatarBehaviors.onListeningStart();
       this.avatarController.lookAtCamera(1000);
-      
     } catch (error) {
-      this.isListening = false;
-      this.updateStatus('Ready to talk!', 'ready');
-      document.getElementById('start-conversation').disabled = false;
-      document.getElementById('stop-conversation').disabled = true;
-      ErrorHandler.handle(error, 'Start listening');
+      this.showLoading(false);
+      this.updateStatus('Failed to start', 'error');
+      ErrorHandler.handle(error, 'Start session');
     }
   }
-  
-  stopListening() {
-    if (!this.isListening) return;
-    
-    console.log('🛑 Stopping recording...');
-    
+
+  stopSession() {
+    console.log('[APP] Stopping session...');
+    this.audioProcessor.stopCapture();
     this.isListening = false;
-    this.audioProcessor.stopRecording();
     this.avatarBehaviors.onListeningEnd();
-    
-    // Update UI
-    this.updateStatus('Processing...', 'processing');
-    document.getElementById('start-conversation').disabled = false;
-    document.getElementById('stop-conversation').disabled = true;
-    
-    // Reset audio level
     this.updateAudioLevel(0);
+
+    this.wsSend({ type: 'stop_session' });
+    this.streamingHandler.stopStream();
+
+    this.isSessionActive = false;
+    this.updateSessionUI();
+    this.updateStatus('Session ended', 'ready');
   }
-  
-  async sendTextMessage() {
+
+  // ----------------------------------------------------------------
+  // Text messaging
+  // ----------------------------------------------------------------
+
+  sendTextMessage() {
     const textInput = document.getElementById('text-input');
     const message = textInput.value.trim();
-    
-    if (!message) {
+    if (!message) return;
+
+    if (!this.isSessionActive) {
+      ErrorHandler.showUserMessage('Start a session first before sending text.', 'warning');
       return;
     }
-    
-    try {
-      // Disable input while processing
-      textInput.disabled = true;
-      document.getElementById('send-text-btn').disabled = true;
-      
-      this.showLoading(true);
-      this.updateStatus('Processing your message...', 'processing');
-      
-      // Display user's message
-      this.displayTranscript(message, 'user');
-      
-      // Add to conversation history
-      this.conversationHistory.push({
-        role: 'user',
-        content: message
-      });
-      
-      // Get LLM response
-      const chatResponse = await this.openai.chat(this.conversationHistory);
-      const assistantMessage = chatResponse.message;
-      
-      // Add to conversation history
-      this.conversationHistory.push({
-        role: 'assistant',
-        content: assistantMessage
-      });
-      
-      // Display assistant's response
-      this.displayTranscript(assistantMessage, 'assistant');
-      this.displayResponse(assistantMessage);
-      
-      // Apply mood and gesture if provided
-      if (chatResponse.mood) {
-        console.log('🎭 Setting mood:', chatResponse.mood);
-        this.avatarController.setMood(chatResponse.mood);
-      }
-      
-      // Update status
-      this.updateStatus('Speaking...', 'speaking');
-      this.avatarBehaviors.onSpeakingStart();
-      
-      // Play gesture if provided (before or during speech)
-      if (chatResponse.gesture) {
-        console.log('👋 Playing gesture:', chatResponse.gesture);
-        setTimeout(() => {
-          this.avatarController.playGesture(chatResponse.gesture, 2);
-        }, 500);
-      }
-      
-      // Generate speech and play with avatar
-      const ttsResponse = await this.openai.textToSpeech(assistantMessage, this.selectedVoice);
-      await this.avatarController.speak(ttsResponse.audio, ttsResponse.timestamps, assistantMessage);
-      
-      // Reset status
-      this.updateStatus('Ready to talk!', 'ready');
-      this.avatarBehaviors.onSpeakingEnd();
-      this.showLoading(false);
-      
-      // Clear input
-      textInput.value = '';
-      
-    } catch (error) {
-      this.showLoading(false);
-      this.updateStatus('Error occurred', 'error');
-      ErrorHandler.handle(error, 'Text message processing');
-      
-      // Reset to ready state after error
-      setTimeout(() => {
-        this.updateStatus('Ready to talk!', 'ready');
-      }, 3000);
-    } finally {
-      // Re-enable input
-      textInput.disabled = false;
-      document.getElementById('send-text-btn').disabled = false;
-      textInput.focus();
-    }
-  }
-  
-  async handleRecordingComplete(audioBlob) {
-    try {
-      console.log('📼 Recording complete:', {
-        type: audioBlob.type,
-        size: audioBlob.size,
-        sizeKB: (audioBlob.size / 1024).toFixed(2) + ' KB'
-      });
-      
-      if (audioBlob.size === 0) {
-        throw new Error('Recording failed: Audio file is empty. Please check your microphone.');
-      }
-      
-      if (audioBlob.size < 1000) {
-        console.warn('⚠️ Audio blob is very small, may not contain speech');
-      }
-      
-      this.showLoading(true);
-      this.updateStatus('Processing your request...', 'processing');
-      
-      // Use the voice chain API for complete STT -> LLM -> TTS pipeline
-      const result = await this.openai.processVoiceChain(audioBlob);
-      
-      // Display user's message
-      this.displayTranscript(result.userMessage, 'user');
-      
-      // Display assistant's response
-      this.displayTranscript(result.assistantMessage, 'assistant');
-      this.displayResponse(result.assistantMessage);
-      
-      // Apply mood and gesture if provided
-      if (result.mood) {
-        console.log('🎭 Setting mood:', result.mood);
-        this.avatarController.setMood(result.mood);
-      }
-      
-      // Update status
-      this.updateStatus('Speaking...', 'speaking');
-      this.avatarBehaviors.onSpeakingStart();
-      
-      // Play gesture if provided (before or during speech)
-      if (result.gesture && result.gesture !== 'none') {
-        console.log('👋 Playing gesture:', result.gesture);
-        setTimeout(() => {
-          this.avatarController.playGesture(result.gesture, 2);
-        }, 500); // Slight delay so it doesn't interfere with speech start
-      } else if (result.gesture === 'none') {
-        console.log('⏭️ Skipping gesture (none)');
-      }
 
-      // Play animation if provided
-      if (result.animation && result.animation !== 'none') {
-        console.log('🎬 Playing animation:', result.animation);
-        setTimeout(async () => {
-          try {
-            await this.avatarController.playAnimation(result.animation, result.animationDuration || 10);
-          } catch (error) {
-            console.error('Animation playback error:', error);
-          }
-        }, 300);
-      } else if (result.animation === 'none') {
-        console.log('⏭️ Skipping animation (none)');
-      }
-      
-      // Play response with avatar
-      await this.avatarController.speak(result.audio, result.timestamps, result.assistantMessage);
-      
-      // Reset status
-      this.updateStatus('Ready to talk!', 'ready');
-      this.avatarBehaviors.onSpeakingEnd();
-      this.showLoading(false);
-      
-    } catch (error) {
-      this.showLoading(false);
-      this.updateStatus('Error occurred', 'error');
-      ErrorHandler.handle(error, 'Voice processing');
-      
-      // Reset to ready state after error
-      setTimeout(() => {
-        this.updateStatus('Ready to talk!', 'ready');
-      }, 3000);
+    console.log(`[APP] Sending text: "${message}"`);
+    this.displayTranscript(message, 'user');
+    this.wsSend({ type: 'text_message', text: message });
+
+    textInput.value = '';
+    textInput.focus();
+  }
+
+  // ----------------------------------------------------------------
+  // UI helpers
+  // ----------------------------------------------------------------
+
+  wsSend(data) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(data));
+    } else {
+      console.warn('[WS] Cannot send, socket not open. State:', this.ws?.readyState);
     }
   }
-  
+
+  updateSessionUI() {
+    const startBtn = document.getElementById('start-conversation');
+    const stopBtn = document.getElementById('stop-conversation');
+    const voiceSelect = document.getElementById('gemini-voice');
+    if (startBtn) startBtn.disabled = this.isSessionActive;
+    if (stopBtn) stopBtn.disabled = !this.isSessionActive;
+    if (voiceSelect) voiceSelect.disabled = this.isSessionActive;
+  }
+
   displayTranscript(text, role) {
-    const transcriptBox = document.getElementById('transcript');
-    if (!transcriptBox) return;
-    
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${role}`;
-    
-    const labelDiv = document.createElement('div');
-    labelDiv.className = 'message-label';
-    labelDiv.textContent = role === 'user' ? 'You:' : 'Assistant:';
-    
-    const textDiv = document.createElement('div');
-    textDiv.textContent = text;
-    
-    messageDiv.appendChild(labelDiv);
-    messageDiv.appendChild(textDiv);
-    transcriptBox.appendChild(messageDiv);
-    
-    // Auto-scroll to bottom
-    transcriptBox.scrollTop = transcriptBox.scrollHeight;
+    const box = document.getElementById('transcript');
+    if (!box) return;
+
+    const div = document.createElement('div');
+    div.className = `message ${role}`;
+
+    const label = document.createElement('div');
+    label.className = 'message-label';
+    label.textContent = role === 'user' ? 'You:' : 'Assistant:';
+
+    const body = document.createElement('div');
+    body.className = 'message-body';
+    body.textContent = text;
+
+    div.appendChild(label);
+    div.appendChild(body);
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
   }
-  
-  displayResponse(text) {
-    const responseBox = document.getElementById('response');
-    if (responseBox) {
-      responseBox.textContent = text;
+
+  appendToTranscript(text, _role) {
+    const box = document.getElementById('transcript');
+    if (!box) return;
+
+    let bubble = box.querySelector('.message.assistant-streaming');
+    if (!bubble) {
+      bubble = document.createElement('div');
+      bubble.className = 'message assistant assistant-streaming';
+
+      const label = document.createElement('div');
+      label.className = 'message-label';
+      label.textContent = 'Assistant:';
+
+      const body = document.createElement('div');
+      body.className = 'message-body';
+
+      bubble.appendChild(label);
+      bubble.appendChild(body);
+      box.appendChild(bubble);
     }
-  }
-  
-  clearConversation() {
-    const transcriptBox = document.getElementById('transcript');
+
+    const body = bubble.querySelector('.message-body');
+    body.textContent += text;
+    box.scrollTop = box.scrollHeight;
+
     const responseBox = document.getElementById('response');
-    
-    if (transcriptBox) transcriptBox.innerHTML = '';
+    if (responseBox) responseBox.textContent += text;
+  }
+
+  flushAssistantStream() {
+    const box = document.getElementById('transcript');
+    if (!box) return;
+    const bubble = box.querySelector('.message.assistant-streaming');
+    if (bubble) {
+      bubble.classList.remove('assistant-streaming');
+    }
+    const responseBox = document.getElementById('response');
     if (responseBox) responseBox.textContent = '';
-    
-    this.openai.clearHistory();
+  }
+
+  clearConversation() {
+    const box = document.getElementById('transcript');
+    const responseBox = document.getElementById('response');
+    if (box) box.innerHTML = '';
+    if (responseBox) responseBox.textContent = '';
+    this.conversationHistory = [];
     ErrorHandler.showSuccess('Conversation cleared');
   }
-  
+
   updateAudioLevel(level) {
-    const levelFill = document.getElementById('audio-level-fill');
-    if (levelFill) {
-      levelFill.style.width = `${level}%`;
-    }
+    const fill = document.getElementById('audio-level-fill');
+    if (fill) fill.style.width = `${level}%`;
   }
-  
+
   updateStatus(message, state = 'default') {
     const statusText = document.getElementById('status-text');
     const statusDot = document.querySelector('.status-dot');
-    
-    if (statusText) {
-      statusText.textContent = message;
-    }
-    
+
+    if (statusText) statusText.textContent = message;
     if (statusDot) {
       statusDot.className = 'status-dot';
-      if (state === 'ready' || state === 'listening') {
-        statusDot.classList.add('ready');
-      } else if (state === 'speaking') {
-        statusDot.classList.add('speaking');
-      }
+      if (state === 'ready' || state === 'listening') statusDot.classList.add('ready');
+      else if (state === 'speaking') statusDot.classList.add('speaking');
     }
   }
-  
+
   updateConnectionStatus(connected) {
-    const statusElement = document.getElementById('connection-status');
-    if (statusElement) {
-      statusElement.className = connected ? 'connection-status connected' : 'connection-status';
-      statusElement.innerHTML = `<span class="dot"></span> ${connected ? 'Connected' : 'Disconnected'}`;
+    const el = document.getElementById('connection-status');
+    if (el) {
+      el.className = connected ? 'connection-status connected' : 'connection-status';
+      el.innerHTML = `<span class="dot"></span> ${connected ? 'Connected' : 'Disconnected'}`;
     }
   }
-  
+
   showLoading(show) {
     const overlay = document.getElementById('loading-overlay');
     if (overlay) {
-      if (show) {
-        overlay.classList.remove('hidden');
-      } else {
-        overlay.classList.add('hidden');
-      }
+      if (show) overlay.classList.remove('hidden');
+      else overlay.classList.add('hidden');
     }
   }
 }
 
-// Initialize app when DOM is ready
+// ----------------------------------------------------------------
+// Bootstrap
+// ----------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('🚀 Initializing Voice Avatar App...');
+  console.log('[APP] Initializing Voice Avatar App (Gemini Live)...');
   const app = new VoiceAvatarApp();
-  
-  // Expose app globally for console testing
   window.app = app;
-  console.log('💡 Tip: Access app via window.app or just "app" in console');
-  console.log('💡 Try: app.avatarController.playAnimation("waving")');
+  console.log('[APP] Tip: Access app via window.app in console');
 });
