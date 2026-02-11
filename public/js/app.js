@@ -102,7 +102,7 @@ class VoiceAvatarApp {
 
   async checkServerHealth() {
     try {
-      const res = await fetch('/api/health');
+      const res = await fetch('/saas/avatar/api/health');
       const data = await res.json();
       if (data.status !== 'ok') throw new Error('Server not healthy');
       console.log('[APP] Server health check passed');
@@ -118,8 +118,7 @@ class VoiceAvatarApp {
   setupWebSocket() {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = window.location.hostname;
-    const wsPort = 8080;
-    const url = `${wsProtocol}//${wsHost}:${wsPort}`;
+    const url = `${wsProtocol}//${wsHost}/saas/avatar/ws/`;
 
     console.log(`[WS] Connecting to ${url}...`);
     this.ws = new WebSocket(url);

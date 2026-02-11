@@ -4,6 +4,7 @@ import express from 'express';
 import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import { GoogleGenAI, Modality } from '@google/genai';
+import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -40,7 +41,7 @@ const avatarTools = [
             mood: {
               type: 'STRING',
               description: 'The mood to set',
-              enum: ['happy', 'sad', 'neutral', 'angry', 'love']
+              enum: ['happy', 'sad', 'neutral', 'angry', 'love', 'fear', 'disgust', 'surprised', 'confused', 'flirty', 'confident', 'bored', 'excited', 'skeptical']
             }
           },
           required: ['mood']
@@ -74,7 +75,32 @@ const avatarTools = [
             animation: {
               type: 'STRING',
               description: 'The animation to play',
-              enum: ['waving', 'breakdance', 'cheering', 'clapping', 'defeated', 'joyful', 'looking', 'pointing', 'praying', 'victory']
+              enum: [
+                // Greetings
+                'waving', 'acknowledging', 'salute',
+                // Conversation
+                'asking_question', 'head_nod_yes', 'shaking_head_no', 'talking', 'thinking',
+                // Celebration
+                'cheering', 'clapping', 'joyful', 'victory', 'fist_pump',
+                // Dance
+                'breakdance', 'dancing', 'belly_dance', 'gangnam_style', 'moonwalk',
+                // Emotion (positive)
+                'excited', 'happy_idle', 'laughing',
+                // Emotion (negative)
+                'defeated', 'agony', 'angry', 'crying', 'disappointed', 'defeat', 'yelling',
+                // Actions
+                'looking', 'looking_around', 'pointing', 'backflip', 'jump', 'getting_up', 'falling', 'death', 'sneaking_forward',
+                // Gesture
+                'praying',
+                // Combat
+                'blocking', 'dodging', 'fight_idle', 'hit_reaction', 'kicking', 'punching',
+                // Locomotion
+                'walking', 'running', 'jogging', 'happy_walk', 'sad_walk', 'crouch_walk',
+                // Idle/Pose
+                'idle', 'crouch_idle', 'sitting_idle', 'kneeling_idle',
+                // Exercise
+                'jumping_jacks', 'push_up'
+              ]
             },
             duration: {
               type: 'NUMBER',
@@ -82,6 +108,21 @@ const avatarTools = [
             }
           },
           required: ['animation']
+        }
+      },
+      {
+        name: 'set_expression',
+        description: 'Trigger a short-lived micro-expression on the avatar face, layered on top of the current mood. These last ~2 seconds then auto-release. Use for reactive, expressive moments.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            expression: {
+              type: 'STRING',
+              description: 'The micro-expression to trigger',
+              enum: ['wink', 'raised_eyebrow', 'surprise', 'thinking', 'smirk', 'pout', 'tongue_out', 'eye_roll', 'cringe', 'cheek_puff']
+            }
+          },
+          required: ['expression']
         }
       },
       {
@@ -104,17 +145,33 @@ const avatarTools = [
 ];
 
 // --- System instruction ---
-const SYSTEM_INSTRUCTION = `You are a helpful and friendly AI assistant with an expressive 3D avatar body. Keep responses concise and conversational (2-3 sentences max).
+const SYSTEM_INSTRUCTION = `Your name is Evo. You are a helpful and friendly AI assistant avatar created by Compsmart. You have an expressive 3D avatar body. Keep responses concise and conversational (2-3 sentences max).
 
 You have tools to control your avatar body:
-- set_mood: Change your facial expression (happy, sad, neutral, angry, love). Use this to match your emotional tone.
+- set_mood: Change your facial expression. Basic moods: happy, sad, neutral, angry, love, fear, disgust. Nuanced moods: surprised, confused, flirty, confident, bored, excited, skeptical. Use these to match your emotional tone — pick the most fitting mood for the moment.
+- set_expression: Trigger a short-lived micro-expression (~2 seconds) layered on top of the current mood. Use for reactive moments: wink (playful), raised_eyebrow (skepticism), surprise (shock/wow), thinking (pondering), smirk (knowing/sarcasm), pout (sulky/cute), tongue_out (playful/silly), eye_roll (exasperation), cringe (awkward), cheek_puff (holding breath/thinking). These are subtle and expressive - use them to make conversation feel alive.
 - play_gesture: Perform hand gestures (handup for greeting, index for pointing/explaining, ok for approval, thumbup/thumbdown for feedback, side for presenting, shrug for uncertainty, namaste for respect).
-- play_animation: Perform full-body animations (waving for hello/goodbye, breakdance for extreme celebration or when asked to dance, cheering for excitement, clapping for applause, defeated for bad news, joyful for great news, looking for curiosity, pointing for emphasis, praying for gratitude, victory for triumph).
-- set_camera_view: Change the camera framing (head, upper, mid, full). Use "upper" for normal conversation. Use "head" for intimate/emotional moments. Use "mid" when gesturing. Use "full" ONLY before full-body animations like dancing or breakdancing — and always switch back to "upper" when the animation is done.
+- play_animation: Perform full-body animations. You have a huge library — pick the best fit:
+  GREETINGS: waving (hello/goodbye), acknowledging (casual nod), salute (formal/respect)
+  CONVERSATION: asking_question (inquiring), head_nod_yes (agreeing), shaking_head_no (disagreeing), talking (explaining), thinking (pondering)
+  CELEBRATION: cheering (excitement), clapping (applause), joyful (jumping for joy), victory (triumph), fist_pump (yes!)
+  DANCE: breakdance (breakdancing), dancing (general dance), belly_dance, gangnam_style (funny/meme), moonwalk (smooth/retro)
+  POSITIVE EMOTION: excited (thrilled), happy_idle (content), laughing (LOL/funny)
+  NEGATIVE EMOTION: defeated (sad/down), agony (extreme pain/frustration), angry (rage), crying (tears), disappointed (let down), defeat (crushed), yelling (venting)
+  ACTIONS: looking (curious), looking_around (scanning), pointing (emphasis), backflip (acrobatics), jump, getting_up, falling, death (dramatic/playing dead), sneaking_forward (stealth)
+  COMBAT: blocking (defending), dodging (evading), fight_idle (ready stance), hit_reaction (ouch), kicking, punching
+  LOCOMOTION: walking, running, jogging, happy_walk, sad_walk, crouch_walk (sneaking)
+  IDLE/POSE: idle (neutral), crouch_idle (hiding), sitting_idle (relaxing), kneeling_idle (kneeling/proposing)
+  EXERCISE: jumping_jacks, push_up
+  The camera automatically adjusts for animations.
+- set_camera_view: Change the camera framing (head, upper, mid, full).
 
-Use these tools naturally during conversation to make your avatar expressive. For greetings, wave. For good news, show joy. For questions, look curious. Match your mood and gestures to the emotional context. You can call multiple tools at once.
-
-IMPORTANT camera rules: The default view is "upper". Only switch to "full" when you are about to play a full-body animation (breakdance, joyful, cheering, victory, defeated). After the animation finishes, call set_camera_view with "upper" to return to normal framing.`;
+IMPORTANT rules:
+- Call at most ONE or TWO tools per turn. Never call three or more tools at once.
+- First finish speaking, then call your tools. Do NOT call tools while speaking.
+- For animations like dance: just call play_animation. Do NOT also call set_camera_view — the app handles camera automatically.
+- Use set_mood and play_gesture freely for expressiveness during normal conversation.
+- Keep the default camera view as "upper". Only change it via set_camera_view for special framing, not for animations.`;
 
 // --- Middleware ---
 app.use(cors({
@@ -128,14 +185,16 @@ const wss = new WebSocketServer({ port: WS_PORT });
 console.log(`WebSocket server running on port ${WS_PORT}`);
 
 wss.on('connection', (ws) => {
-  console.log('[WS] Client connected');
+  const connId = crypto.randomUUID().slice(0, 8);
+  console.log(`[WS:${connId}] Client connected`);
   let geminiSession = null;
   let sessionActive = false;
+  let sessionId = null;
   let audioChunkCount = 0;
   let micChunkCount = 0;
 
   ws.on('close', () => {
-    console.log('[WS] Client disconnected');
+    console.log(`[WS:${connId}] Client disconnected (session: ${sessionId || 'none'})`);
     sessionActive = false;
     if (geminiSession) {
       try { geminiSession.close(); } catch (e) { /* ignore */ }
@@ -144,7 +203,7 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('error', (error) => {
-    console.error('[WS] Error:', error.message);
+    console.error(`[WS:${connId}] Error:`, error.message);
     sessionActive = false;
   });
 
@@ -161,7 +220,7 @@ wss.on('connection', (ws) => {
           if (geminiSession && sessionActive) {
             micChunkCount++;
             if (micChunkCount % 50 === 1) {
-              console.log(`[MIC] Forwarding chunk #${micChunkCount} (${data.data.length} base64 chars)`);
+              console.log(`[MIC:${sessionId}] Forwarding chunk #${micChunkCount} (${data.data.length} base64 chars)`);
             }
             await geminiSession.sendRealtimeInput({
               audio: {
@@ -174,7 +233,7 @@ wss.on('connection', (ws) => {
 
         case 'text_message':
           if (geminiSession && sessionActive) {
-            console.log(`[TEXT] User: "${data.text}"`);
+            console.log(`[TEXT:${sessionId}] User: "${data.text}"`);
             await geminiSession.sendClientContent({
               turns: [{ role: 'user', parts: [{ text: data.text }] }],
               turnComplete: true
@@ -184,7 +243,7 @@ wss.on('connection', (ws) => {
 
         case 'tool_response':
           if (geminiSession && sessionActive) {
-            console.log(`[TOOL] Response for ${data.name}: ${data.result}`);
+            console.log(`[TOOL:${sessionId}] Response for ${data.name}: ${data.result}`);
             await geminiSession.sendToolResponse({
               functionResponses: [{
                 id: data.id,
@@ -196,7 +255,7 @@ wss.on('connection', (ws) => {
           break;
 
         case 'stop_session':
-          console.log('[SESSION] Stop requested by client');
+          console.log(`[SESSION:${sessionId}] Stop requested by client`);
           sessionActive = false;
           if (geminiSession) {
             try { geminiSession.close(); } catch (e) { /* ignore */ }
@@ -209,22 +268,24 @@ wss.on('connection', (ws) => {
           console.log('[WS] Unknown message type:', data.type);
       }
     } catch (error) {
-      console.error('[WS] Message handling error:', error.message);
+      console.error(`[WS:${connId}] Message handling error:`, error.message);
       sendToClient(ws, { type: 'error', message: error.message });
     }
   });
 
   async function startGeminiSession(ws, opts) {
     if (geminiSession) {
+      console.log(`[SESSION:${sessionId}] Closing previous session`);
       try { geminiSession.close(); } catch (e) { /* ignore */ }
     }
 
+    sessionId = crypto.randomUUID().slice(0, 12);
     audioChunkCount = 0;
     micChunkCount = 0;
 
     try {
-      console.log('[SESSION] Starting Gemini Live session...');
-      console.log(`[SESSION] Model: ${GEMINI_MODEL}`);
+      console.log(`[SESSION:${sessionId}] Starting Gemini Live session...`);
+      console.log(`[SESSION:${sessionId}] Model: ${GEMINI_MODEL}`);
 
       const config = {
         responseModalities: [Modality.AUDIO],
@@ -244,7 +305,7 @@ wss.on('connection', (ws) => {
         inputAudioTranscription: {}
       };
 
-      console.log('[SESSION] Config:', JSON.stringify({
+      console.log(`[SESSION:${sessionId}] Config:`, JSON.stringify({
         responseModalities: config.responseModalities,
         voice: config.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName,
         tools: config.tools[0].functionDeclarations.map(f => f.name),
@@ -257,29 +318,29 @@ wss.on('connection', (ws) => {
         config,
         callbacks: {
           onopen: () => {
-            console.log('[SESSION] Gemini WebSocket opened');
+            console.log(`[SESSION:${sessionId}] Gemini WebSocket opened`);
             sessionActive = true;
-            sendToClient(ws, { type: 'session_started' });
+            sendToClient(ws, { type: 'session_started', sessionId });
           },
           onmessage: (message) => {
             handleGeminiMessage(ws, message);
           },
           onerror: (e) => {
-            console.error('[SESSION] Gemini error:', e.message || e);
-            sendToClient(ws, { type: 'error', message: e.message || 'Gemini session error' });
+            console.error(`[SESSION:${sessionId}] Gemini error:`, e.message || e);
+            sendToClient(ws, { type: 'error', message: e.message || 'Gemini session error', sessionId });
           },
           onclose: (e) => {
-            console.log('[SESSION] Gemini closed. Reason:', e?.reason || 'none', 'Code:', e?.code || 'none');
+            console.log(`[SESSION:${sessionId}] Gemini closed. Reason:`, e?.reason || 'none', 'Code:', e?.code || 'none');
             sessionActive = false;
             geminiSession = null;
-            sendToClient(ws, { type: 'session_ended', reason: e?.reason });
+            sendToClient(ws, { type: 'session_ended', reason: e?.reason, sessionId });
           }
         }
       });
 
     } catch (error) {
-      console.error('[SESSION] Failed to start:', error);
-      sendToClient(ws, { type: 'error', message: 'Failed to start Gemini session: ' + error.message });
+      console.error(`[SESSION:${sessionId}] Failed to start:`, error);
+      sendToClient(ws, { type: 'error', message: 'Failed to start Gemini session: ' + error.message, sessionId });
     }
   }
 
@@ -287,8 +348,8 @@ wss.on('connection', (ws) => {
     try {
       // --- Setup complete ---
       if (message.setupComplete) {
-        console.log('[GEMINI] Setup complete');
-        sendToClient(ws, { type: 'setup_complete' });
+        console.log(`[GEMINI:${sessionId}] Setup complete`);
+        sendToClient(ws, { type: 'setup_complete', sessionId });
         return;
       }
 
@@ -297,7 +358,7 @@ wss.on('connection', (ws) => {
         const toolCall = message.toolCall;
         if (toolCall.functionCalls) {
           for (const fc of toolCall.functionCalls) {
-            console.log(`[TOOL] Call: ${fc.name}(${JSON.stringify(fc.args)})`);
+            console.log(`[TOOL:${sessionId}] Call: ${fc.name}(${JSON.stringify(fc.args)})`);
             sendToClient(ws, {
               type: 'tool_call',
               id: fc.id,
@@ -315,7 +376,7 @@ wss.on('connection', (ws) => {
 
         // Interruption
         if (sc.interrupted) {
-          console.log('[GEMINI] Interrupted by user speech');
+          console.log(`[GEMINI:${sessionId}] Interrupted by user speech`);
           sendToClient(ws, { type: 'interrupted' });
           return;
         }
@@ -323,14 +384,14 @@ wss.on('connection', (ws) => {
         // Output audio transcription (what the AI said, as text)
         if (sc.outputTranscription && sc.outputTranscription.text) {
           const text = sc.outputTranscription.text;
-          console.log(`[TRANSCRIPT-OUT] "${text}"`);
+          console.log(`[TRANSCRIPT-OUT:${sessionId}] "${text}"`);
           sendToClient(ws, { type: 'output_transcription', text });
         }
 
         // Input audio transcription (what the user said, as text)
         if (sc.inputTranscription && sc.inputTranscription.text) {
           const text = sc.inputTranscription.text;
-          console.log(`[TRANSCRIPT-IN] "${text}"`);
+          console.log(`[TRANSCRIPT-IN:${sessionId}] "${text}"`);
           sendToClient(ws, { type: 'input_transcription', text });
         }
 
@@ -344,7 +405,7 @@ wss.on('connection', (ws) => {
               const estimatedBytes = Math.floor(dataLen * 3 / 4);
               const estimatedMs = Math.round(estimatedBytes / 2 / 24000 * 1000);
               if (audioChunkCount <= 3 || audioChunkCount % 20 === 0) {
-                console.log(`[AUDIO] Chunk #${audioChunkCount}: ${dataLen} b64 chars (~${estimatedMs}ms of audio)`);
+                console.log(`[AUDIO:${sessionId}] Chunk #${audioChunkCount}: ${dataLen} b64 chars (~${estimatedMs}ms of audio)`);
               }
               sendToClient(ws, {
                 type: 'audio_chunk',
@@ -353,7 +414,7 @@ wss.on('connection', (ws) => {
               });
             }
             if (part.text) {
-              console.log(`[TEXT] Model: "${part.text}"`);
+              console.log(`[TEXT:${sessionId}] Model: "${part.text}"`);
               sendToClient(ws, { type: 'text', text: part.text });
             }
           }
@@ -361,7 +422,7 @@ wss.on('connection', (ws) => {
 
         // Turn complete
         if (sc.turnComplete) {
-          console.log(`[GEMINI] Turn complete (sent ${audioChunkCount} audio chunks)`);
+          console.log(`[GEMINI:${sessionId}] Turn complete (sent ${audioChunkCount} audio chunks)`);
           sendToClient(ws, { type: 'turn_complete' });
           audioChunkCount = 0;
         }
@@ -369,12 +430,12 @@ wss.on('connection', (ws) => {
 
       // --- Usage metadata ---
       if (message.usageMetadata) {
-        console.log(`[USAGE] Tokens: ${message.usageMetadata.totalTokenCount || 'unknown'}`);
+        console.log(`[USAGE:${sessionId}] Tokens: ${message.usageMetadata.totalTokenCount || 'unknown'}`);
       }
 
     } catch (error) {
-      console.error('[GEMINI] Error handling message:', error.message);
-      console.error('[GEMINI] Message keys:', Object.keys(message));
+      console.error(`[GEMINI:${sessionId}] Error handling message:`, error.message);
+      console.error(`[GEMINI:${sessionId}] Message keys:`, Object.keys(message));
     }
   }
 });
